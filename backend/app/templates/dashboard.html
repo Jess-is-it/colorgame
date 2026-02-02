@@ -1,85 +1,70 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="grid">
-  <section class="card">
-    <h2>Processing</h2>
+<section class="card">
+  <h2>Live Feed</h2>
 
-    <div class="row">
-      <span class="muted">OBS -> RTMP:</span>
-      <span id="rtmpPublish" class="mono">checking...</span>
-      <span class="muted">Server:</span>
-      <span class="mono">{{ public_server_url }}</span>
-      <span class="muted">Key:</span>
-      <span class="mono">{{ public_stream_key }}</span>
-      <a class="muted" href="/settings">settings</a>
-    </div>
+  <div class="row">
+    <span class="muted">RTMP publish status:</span>
+    <span id="rtmpPublish" class="mono">checking...</span>
+    <a class="muted" href="{{ stat_url }}" target="_blank" rel="noopener">rtmp stat</a>
+  </div>
 
-    <div class="row">
-      <label>Preset</label>
-      <select id="presetSelect">
-        <option value="">-- Select --</option>
-        {% for p in presets %}
-          <option value="{{ p.id }}">{{ p.name }} ({{ p.input_width }}x{{ p.input_height }})</option>
-        {% endfor %}
-      </select>
-      <a class="muted" href="/presets">Edit presets</a>
-    </div>
+  <div class="row">
+    <span class="muted">HLS URL:</span>
+    <span class="mono">{{ hls_url }}</span>
+  </div>
 
-    <div class="row">
-      <label>Sample FPS</label>
-      <input id="sampleFps" type="number" min="0.2" step="0.2" value="{{ status.sample_fps or 2.0 }}" />
-      <span class="muted">MVP default: 1-5</span>
-    </div>
+  <div class="preview" style="margin-top: 12px;">
+    <video id="video" controls autoplay muted playsinline></video>
+    <div id="videoMsg" class="muted">Loading stream…</div>
+  </div>
+</section>
 
-    <div class="row">
-      <button id="startBtn" class="btn primary">Start</button>
-      <button id="stopBtn" class="btn">Stop</button>
-      <span id="startStopMsg" class="muted"></span>
-    </div>
+<script>
+  const hlsUrl = {{ hls_url | tojson }};
 
-    <div class="status">
-      <div><span class="k">Running</span> <span id="stRunning">{{ status.running }}</span></div>
-      <div><span class="k">Preset</span> <span id="stPreset">{{ status.preset_id or "-" }}</span></div>
-      <div><span class="k">Connected</span> <span id="stConnected">{{ status.connected }}</span></div>
-      <div><span class="k">Frames</span> <span id="stFrames">{{ status.frames_processed }}</span></div>
-      <div><span class="k">Last frame</span> <span id="stLastFrame">{{ status.last_frame_time or "-" }}</span></div>
-      <div><span class="k">Last error</span> <span id="stLastError">{{ status.last_error or "-" }}</span></div>
-    </div>
+  async function pollRtmp() {
+    try {
+      const r = await fetch('/api/rtmp/status');
+      const j = await r.json();
+      const pub = !!j.publishing;
+      document.getElementById('rtmpPublish').textContent = pub ? 'publishing' : 'not publishing';
+    } catch (_) {
+      document.getElementById('rtmpPublish').textContent = 'unknown';
+    }
+    setTimeout(pollRtmp, 1000);
+  }
+  pollRtmp();
 
-    <details class="hint">
-      <summary>OBS Settings (RTMP)</summary>
-      <div class="mono">
-        Server: rtmp://&lt;VM_IP&gt;:1935/live
-        <br />Stream key: stream
-      </div>
-    </details>
-  </section>
+  const video = document.getElementById('video');
+  const msg = document.getElementById('videoMsg');
 
-  <section class="card">
-    <h2>Live Preview + Latest Results</h2>
-    <div class="row">
-      <div class="preview">
-        <img id="previewImg" alt="Stream preview" src="/api/preview.mjpeg" />
-        <div id="previewMsg" class="muted">Preview appears when RTMP is publishing.</div>
-      </div>
-    </div>
-    <div class="row">
-      <span class="muted">Auto-refreshes while processing.</span>
-    </div>
-    <table class="table" id="resultsTable">
-      <thead>
-        <tr>
-          <th>Time</th>
-          <th>Preset</th>
-          <th>Confidence</th>
-          <th>Parsed</th>
-          <th>Raw OCR</th>
-        </tr>
-      </thead>
-      <tbody id="resultsBody">
-        <tr><td class="muted" colspan="5">No results yet.</td></tr>
-      </tbody>
-    </table>
-  </section>
-</div>
+  // Use hls.js for Chrome/Firefox/Edge. Safari can play HLS natively.
+  (function start() {
+    if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = hlsUrl;
+      msg.textContent = '';
+      return;
+    }
+
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/hls.js@1';
+    s.onload = () => {
+      if (!window.Hls || !window.Hls.isSupported()) {
+        msg.textContent = 'HLS not supported in this browser.';
+        return;
+      }
+      const hls = new window.Hls({ liveSyncDurationCount: 2, maxLiveSyncPlaybackRate: 1.25 });
+      hls.loadSource(hlsUrl);
+      hls.attachMedia(video);
+      hls.on(window.Hls.Events.ERROR, function (evt, data) {
+        // Most common: playlist not available yet.
+        msg.textContent = 'Waiting for HLS… (is OBS streaming?)';
+      });
+      msg.textContent = '';
+    };
+    s.onerror = () => { msg.textContent = 'Failed to load hls.js (check internet connectivity).'; };
+    document.head.appendChild(s);
+  })();
+</script>
 {% endblock %}

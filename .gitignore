@@ -21,3 +21,4 @@ venv/
 
 # App runtime
 data/
+hls/

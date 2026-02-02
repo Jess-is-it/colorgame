@@ -9,14 +9,11 @@
   <body>
     <header class="topbar">
       <div class="brand">
-        <div class="brand-title">Game Result Recorder</div>
-        <div class="brand-sub">MVP - OCR + keywords</div>
+        <div class="brand-title">OBS Stream Dashboard</div>
+        <div class="brand-sub">Live feed + publish status</div>
       </div>
       <nav class="nav">
         <a href="/">Dashboard</a>
-        <a href="/presets">Presets</a>
-        <a href="/results">Results</a>
-        <a href="/settings">Settings</a>
       </nav>
     </header>
 
@@ -24,6 +21,6 @@
       {% block content %}{% endblock %}
     </main>
 
-    <script src="/static/app.js?v={{ static_version }}"></script>
+    {# no global JS; dashboard uses inline JS only #}
   </body>
 </html>

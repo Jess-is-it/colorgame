@@ -53,7 +53,7 @@ a:hover { text-decoration: underline; }
 }
 
 @media (min-width: 980px) {
-  .grid { grid-template-columns: 420px 1fr; }
+  .grid { grid-template-columns: 1fr; }
 }
 
 .card {
@@ -126,17 +126,8 @@ textarea { resize: vertical; }
   background: rgba(0, 0, 0, 0.25);
 }
 
-.preview img {
-  width: 100%;
-  display: block;
-  max-height: 360px;
-  object-fit: contain;
-  background: rgba(0, 0, 0, 0.35);
-}
-
-.preview #previewMsg {
-  padding: 10px;
-}
+.preview video { width: 100%; display: block; max-height: 720px; background: rgba(0, 0, 0, 0.35); }
+.preview #videoMsg { padding: 10px; }
 
 .status {
   display: grid;
