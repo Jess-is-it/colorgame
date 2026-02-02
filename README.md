@@ -4,42 +4,46 @@ Headless Ubuntu MVP to ingest an OBS live stream (RTMP), sample frames, OCR regi
 
 ## Quick start (VM)
 
-### Option A: Without Docker (recommended on a plain Ubuntu VM)
+### Docker Compose (recommended)
+
+1) Install Docker (Ubuntu):
 
 ```bash
-./scripts/install_system_deps_ubuntu.sh
-./scripts/run_mvp.sh
+./scripts/install_docker_ubuntu.sh
 ```
 
-Then open:
-
-- `http://<VM_IP>:8000`
-
-### Option B: With Docker Compose
-
-1) Start services:
+2) Start services:
 
 ```bash
 docker compose up --build
 ```
 
-2) Open the UI from your client machine:
+3) Open the UI from your client machine:
 
 - `http://<VM_IP>:8000`
 
-3) Configure OBS (on the host machine):
+4) Configure OBS (on the host machine):
 
 - Stream type: **Custom**
 - Server: `rtmp://<VM_IP>:1935/live`
 - Stream key: `stream`
 
-4) In the UI:
+5) In the UI:
 
 - Create a preset with the same resolution as your OBS output.
 - Add one or more ROI(s) and a keyword list (comma-separated).
 - Start processing.
 
 When keywords appear in OCR text within any ROI, a result record is stored and shown in the dashboard/results pages.
+
+Tip: The UI has a `Settings` page that shows the RTMP values and (optionally) lets you connect to OBS via obs-websocket to automate starting/stopping streaming.
+
+### Without Docker (fallback)
+
+```bash
+./scripts/install_system_deps_ubuntu.sh
+./scripts/run_mvp.sh
+```
 
 ## Preset format (MVP)
 

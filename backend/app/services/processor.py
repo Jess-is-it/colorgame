@@ -87,9 +87,10 @@ def _compute_confidence(ocr_conf_0_100: float, keyword_score_0_1: float, has_key
 
 
 class StreamProcessor:
-    def __init__(self, preset: PresetSnapshot, *, sample_fps: float):
+    def __init__(self, preset: PresetSnapshot, *, sample_fps: float, stream_url: str):
         self.preset = preset
         self.sample_fps = float(sample_fps)
+        self.stream_url = stream_url
 
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -154,7 +155,7 @@ class StreamProcessor:
             "-loglevel",
             "error",
             "-i",
-            settings.stream_url,
+            self.stream_url,
             "-vf",
             vf,
             "-f",
@@ -325,6 +326,7 @@ class ProcessorManager:
             preset = crud.get_preset(db, preset_id)
             if not preset:
                 raise ValueError("Preset not found")
+            app_settings = crud.get_app_settings(db)
             snap = PresetSnapshot(
                 id=preset.id,
                 name=preset.name,
@@ -335,6 +337,7 @@ class ProcessorManager:
                 confidence_threshold=float(preset.confidence_threshold),
                 score_regex=preset.score_regex,
             )
+            stream_url = app_settings.backend_stream_url or settings.stream_url
         finally:
             db.close()
 
@@ -345,7 +348,7 @@ class ProcessorManager:
                 self._processor.stop()
                 self._processor = None
 
-            self._processor = StreamProcessor(snap, sample_fps=fps)
+            self._processor = StreamProcessor(snap, sample_fps=fps, stream_url=stream_url)
             self._processor.start()
 
     def stop(self) -> None:

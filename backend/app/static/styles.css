@@ -65,6 +65,8 @@ a:hover { text-decoration: underline; }
 }
 
 h2 { margin: 0 0 10px 0; font-size: 18px; }
+.h3 { margin: 18px 0 8px 0; font-size: 15px; }
+.hr { border: 0; border-top: 1px solid var(--border); margin: 16px 0; }
 
 .row { display: flex; align-items: center; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
 .row.between { justify-content: space-between; }
@@ -80,6 +82,8 @@ input, textarea, select {
   background: rgba(0, 0, 0, 0.25);
   color: var(--text);
 }
+
+input[type="checkbox"] { width: auto; }
 
 textarea { resize: vertical; }
 

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app import crud, schemas
 from app.db import SessionLocal
+from app.services import obs_integration
 from app.services.processor import processor_manager
 
 
@@ -130,6 +131,69 @@ def results_page(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, "results.html", {"presets": presets, "results": results})
 
 
+@app.get("/settings", response_class=HTMLResponse)
+def settings_page(request: Request, db: Session = Depends(get_db)):
+    s = crud.get_app_settings(db)
+
+    # Derive public RTMP endpoint from Host header unless explicitly set.
+    host = (request.headers.get("host") or "").split(",")[0].strip()
+    hostname = host.split(":")[0] if host else "VM_IP"
+    public_server_url = s.public_rtmp_server_url or f"rtmp://{hostname}:1935/live"
+
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {
+            "s": {
+                "backend_stream_url": s.backend_stream_url,
+                "public_rtmp_server_url": s.public_rtmp_server_url,
+                "public_stream_key": s.public_stream_key,
+                "obs_ws_enabled": bool(s.obs_ws_enabled),
+                "obs_ws_host": s.obs_ws_host,
+                "obs_ws_port": int(s.obs_ws_port),
+                "obs_ws_password": s.obs_ws_password,
+                "obs_auto_configure_stream": bool(s.obs_auto_configure_stream),
+                "obs_auto_start_stream": bool(s.obs_auto_start_stream),
+                "obs_auto_stop_stream": bool(s.obs_auto_stop_stream),
+            },
+            "public_server_url": public_server_url,
+            "public_stream_key": s.public_stream_key,
+            "backend_stream_url": s.backend_stream_url,
+        },
+    )
+
+
+@app.post("/settings/save")
+def settings_save(
+    request: Request,
+    backend_stream_url: str = Form(default="rtmp://rtmp:1935/live/stream"),
+    public_rtmp_server_url: str | None = Form(default=None),
+    public_stream_key: str = Form(default="stream"),
+    obs_ws_enabled: str | None = Form(default=None),
+    obs_ws_host: str = Form(default="127.0.0.1"),
+    obs_ws_port: int = Form(default=4455),
+    obs_ws_password: str | None = Form(default=None),
+    obs_auto_configure_stream: str | None = Form(default=None),
+    obs_auto_start_stream: str | None = Form(default=None),
+    obs_auto_stop_stream: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+):
+    data = {
+        "backend_stream_url": backend_stream_url.strip() or "rtmp://rtmp:1935/live/stream",
+        "public_rtmp_server_url": (public_rtmp_server_url or "").strip() or None,
+        "public_stream_key": public_stream_key.strip() or "stream",
+        "obs_ws_enabled": 1 if obs_ws_enabled else 0,
+        "obs_ws_host": obs_ws_host.strip() or "127.0.0.1",
+        "obs_ws_port": int(obs_ws_port),
+        "obs_ws_password": (obs_ws_password or "").strip() or None,
+        "obs_auto_configure_stream": 1 if obs_auto_configure_stream else 0,
+        "obs_auto_start_stream": 1 if obs_auto_start_stream else 0,
+        "obs_auto_stop_stream": 1 if obs_auto_stop_stream else 0,
+    }
+    crud.update_app_settings(db, data=data)
+    return RedirectResponse(url="/settings", status_code=303)
+
+
 # --- JSON API ---
 
 
@@ -181,16 +245,124 @@ def api_status():
     return processor_manager.status()
 
 
+@app.get("/api/settings", response_model=schemas.AppSettingsOut)
+def api_get_settings(db: Session = Depends(get_db)):
+    s = crud.get_app_settings(db)
+    return schemas.AppSettingsOut(
+        backend_stream_url=s.backend_stream_url,
+        public_rtmp_server_url=s.public_rtmp_server_url,
+        public_stream_key=s.public_stream_key,
+        obs_ws_enabled=bool(s.obs_ws_enabled),
+        obs_ws_host=s.obs_ws_host,
+        obs_ws_port=int(s.obs_ws_port),
+        obs_ws_password=s.obs_ws_password,
+        obs_auto_configure_stream=bool(s.obs_auto_configure_stream),
+        obs_auto_start_stream=bool(s.obs_auto_start_stream),
+        obs_auto_stop_stream=bool(s.obs_auto_stop_stream),
+    )
+
+
+@app.patch("/api/settings", response_model=schemas.AppSettingsOut)
+def api_update_settings(payload: schemas.AppSettingsUpdate, db: Session = Depends(get_db)):
+    data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    # Normalize bools to ints for sqlite.
+    for k in ["obs_ws_enabled", "obs_auto_configure_stream", "obs_auto_start_stream", "obs_auto_stop_stream"]:
+        if k in data:
+            data[k] = 1 if data[k] else 0
+    s = crud.update_app_settings(db, data=data)
+    return api_get_settings(db)
+
+
+def _obs_cfg_from_db(db: Session) -> obs_integration.ObsConfig:
+    s = crud.get_app_settings(db)
+    return obs_integration.ObsConfig(host=s.obs_ws_host, port=int(s.obs_ws_port), password=s.obs_ws_password)
+
+
+@app.post("/api/obs/test")
+def api_obs_test(db: Session = Depends(get_db)):
+    s = crud.get_app_settings(db)
+    if not bool(s.obs_ws_enabled):
+        raise HTTPException(status_code=400, detail="OBS websocket integration is disabled in Settings")
+    try:
+        return obs_integration.test_connection(_obs_cfg_from_db(db))
+    except obs_integration.ObsIntegrationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/obs/apply_rtmp")
+def api_obs_apply_rtmp(server_url: str, stream_key: str, db: Session = Depends(get_db)):
+    s = crud.get_app_settings(db)
+    if not bool(s.obs_ws_enabled):
+        raise HTTPException(status_code=400, detail="OBS websocket integration is disabled in Settings")
+    try:
+        return obs_integration.apply_rtmp_settings(_obs_cfg_from_db(db), server_url=server_url, stream_key=stream_key)
+    except obs_integration.ObsIntegrationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/obs/start_stream")
+def api_obs_start_stream(db: Session = Depends(get_db)):
+    s = crud.get_app_settings(db)
+    if not bool(s.obs_ws_enabled):
+        raise HTTPException(status_code=400, detail="OBS websocket integration is disabled in Settings")
+    try:
+        return obs_integration.start_stream(_obs_cfg_from_db(db))
+    except obs_integration.ObsIntegrationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/obs/stop_stream")
+def api_obs_stop_stream(db: Session = Depends(get_db)):
+    s = crud.get_app_settings(db)
+    if not bool(s.obs_ws_enabled):
+        raise HTTPException(status_code=400, detail="OBS websocket integration is disabled in Settings")
+    try:
+        return obs_integration.stop_stream(_obs_cfg_from_db(db))
+    except obs_integration.ObsIntegrationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/api/processing/start")
-def api_start_processing(preset_id: int, sample_fps: float | None = None, db: Session = Depends(get_db)):
+def api_start_processing(request: Request, preset_id: int, sample_fps: float | None = None, db: Session = Depends(get_db)):
     preset = crud.get_preset(db, preset_id)
     if not preset:
         raise HTTPException(status_code=404, detail="Preset not found")
+
+    # Optional OBS automation: configure & start streaming before processing.
+    s = crud.get_app_settings(db)
+    if bool(s.obs_ws_enabled) and bool(s.obs_auto_configure_stream):
+        host = (request.headers.get("host") or "").split(",")[0].strip()
+        hostname = host.split(":")[0] if host else "VM_IP"
+        public_server_url = s.public_rtmp_server_url or f"rtmp://{hostname}:1935/live"
+        try:
+            obs_integration.apply_rtmp_settings(_obs_cfg_from_db(db), server_url=public_server_url, stream_key=s.public_stream_key)
+        except obs_integration.ObsIntegrationError:
+            # Don't hard-fail processing; stream might already be configured.
+            pass
+
+    if bool(s.obs_ws_enabled) and bool(s.obs_auto_start_stream):
+        try:
+            obs_integration.start_stream(_obs_cfg_from_db(db))
+        except obs_integration.ObsIntegrationError:
+            pass
+
     processor_manager.start(preset_id=preset.id, sample_fps=sample_fps)
     return {"ok": True}
 
 
 @app.post("/api/processing/stop")
 def api_stop_processing():
+    # Optional OBS automation on stop.
+    db = SessionLocal()
+    try:
+        s = crud.get_app_settings(db)
+        if bool(s.obs_ws_enabled) and bool(s.obs_auto_stop_stream):
+            try:
+                obs_integration.stop_stream(_obs_cfg_from_db(db))
+            except obs_integration.ObsIntegrationError:
+                pass
+    finally:
+        db.close()
+
     processor_manager.stop()
     return {"ok": True}

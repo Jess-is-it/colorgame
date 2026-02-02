@@ -8,6 +8,27 @@ from sqlalchemy.orm import Session
 from app import models
 
 
+def get_app_settings(db: Session) -> models.AppSetting:
+    s = db.get(models.AppSetting, 1)
+    if s:
+        return s
+    s = models.AppSetting(id=1)
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return s
+
+
+def update_app_settings(db: Session, *, data: dict) -> models.AppSetting:
+    s = get_app_settings(db)
+    for k, v in data.items():
+        setattr(s, k, v)
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return s
+
+
 def list_presets(db: Session) -> list[models.Preset]:
     return list(db.execute(select(models.Preset).order_by(models.Preset.name.asc())).scalars())
 

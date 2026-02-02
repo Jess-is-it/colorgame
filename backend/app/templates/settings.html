@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="row between">
+    <h2>Settings</h2>
+    <span class="muted">Docker mode: OBS pushes to VM:1935, backend reads from internal RTMP service.</span>
+  </div>
+
+  <form method="post" action="/settings/save" class="form" style="margin-top: 10px;">
+  <h3 class="h3">RTMP Ingest</h3>
+  <div class="muted">Use these values in OBS (Settings -> Stream).</div>
+
+  <div class="row">
+    <div class="col">
+      <label>OBS Server (public)</label>
+      <input class="mono" name="public_rtmp_server_url" value="{{ s.public_rtmp_server_url or public_server_url }}" />
+    </div>
+    <div class="col">
+      <label>OBS Stream key</label>
+      <input class="mono" name="public_stream_key" value="{{ s.public_stream_key }}" />
+    </div>
+  </div>
+
+  <details class="hint">
+    <summary>ffmpeg read URL (internal)</summary>
+    <div class="muted">Backend reads from this URL (Docker default uses the internal service name).</div>
+    <input class="mono" name="backend_stream_url" value="{{ s.backend_stream_url }}" />
+  </details>
+
+  <hr class="hr" />
+
+  <h3 class="h3">OBS Automation (optional)</h3>
+  <div class="muted">
+    Requires obs-websocket v5 enabled on the OBS host (Tools -> WebSocket Server Settings).
+  </div>
+    <div class="row">
+      <label style="margin: 0;">
+        <input type="checkbox" name="obs_ws_enabled" {% if s.obs_ws_enabled %}checked{% endif %} />
+        Enable OBS websocket integration
+      </label>
+    </div>
+
+    <div class="row">
+      <div class="col">
+        <label>OBS websocket host</label>
+        <input name="obs_ws_host" value="{{ s.obs_ws_host }}" placeholder="192.168.1.123" />
+      </div>
+      <div class="col">
+        <label>OBS websocket port</label>
+        <input name="obs_ws_port" type="number" min="1" value="{{ s.obs_ws_port }}" />
+      </div>
+    </div>
+
+    <label>OBS websocket password</label>
+    <input name="obs_ws_password" value="{{ s.obs_ws_password or '' }}" placeholder="(optional)" />
+
+    <div class="row" style="margin-top: 10px;">
+      <label style="margin: 0;">
+        <input type="checkbox" name="obs_auto_configure_stream" {% if s.obs_auto_configure_stream %}checked{% endif %} />
+        Auto-configure OBS RTMP destination when processing starts
+      </label>
+    </div>
+
+    <div class="row">
+      <label style="margin: 0;">
+        <input type="checkbox" name="obs_auto_start_stream" {% if s.obs_auto_start_stream %}checked{% endif %} />
+        Auto-start OBS streaming when processing starts
+      </label>
+    </div>
+
+    <div class="row">
+      <label style="margin: 0;">
+        <input type="checkbox" name="obs_auto_stop_stream" {% if s.obs_auto_stop_stream %}checked{% endif %} />
+        Auto-stop OBS streaming when processing stops
+      </label>
+    </div>
+
+    <div class="row">
+      <button class="btn primary" type="submit">Save settings</button>
+      <button class="btn" type="button" id="obsTestBtn">Test OBS connection</button>
+      <button class="btn" type="button" id="obsApplyBtn">Apply RTMP to OBS</button>
+      <button class="btn" type="button" id="obsStartBtn">Start OBS stream</button>
+      <button class="btn" type="button" id="obsStopBtn">Stop OBS stream</button>
+      <span class="muted" id="obsMsg"></span>
+    </div>
+
+    <input type="hidden" id="publicServerUrl" value="{{ s.public_rtmp_server_url or public_server_url }}" />
+    <input type="hidden" id="publicStreamKey" value="{{ s.public_stream_key }}" />
+  </form>
+</section>
+{% endblock %}

@@ -1,12 +1,14 @@
 services:
   rtmp:
     image: alfg/nginx-rtmp:latest
+    restart: unless-stopped
     ports:
       - "1935:1935"  # OBS -> RTMP ingest
 
   backend:
     build:
       context: ./backend
+    restart: unless-stopped
     environment:
       GRR_DB_URL: "sqlite:////data/grr.db"
       # Inside the Compose network, the RTMP service name is 'rtmp'

@@ -14,3 +14,4 @@ pytesseract==0.3.13
 
 # Optional but helpful for robustness
 python-dateutil==2.9.0.post0
+obsws-python==1.8.0

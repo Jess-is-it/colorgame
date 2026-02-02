@@ -128,3 +128,70 @@ function hookDashboard() {
 }
 
 hookDashboard();
+
+async function hookSettings() {
+  const testBtn = $("obsTestBtn");
+  if (!testBtn) return; // not on settings page
+
+  const applyBtn = $("obsApplyBtn");
+  const startBtn = $("obsStartBtn");
+  const stopBtn = $("obsStopBtn");
+  const msgEl = $("obsMsg");
+
+  function setMsg(s) {
+    if (msgEl) msgEl.textContent = s;
+  }
+
+  testBtn.addEventListener("click", async () => {
+    try {
+      setMsg("Testing...");
+      const r = await apiJson("/api/obs/test", { method: "POST", body: "{}" });
+      setMsg(`OK (OBS ${r.obs_version || "?"}, ws ${r.ws_version || "?"})`);
+    } catch (e) {
+      setMsg(e.message || String(e));
+    }
+  });
+
+  if (applyBtn) {
+    applyBtn.addEventListener("click", async () => {
+      try {
+        setMsg("Applying RTMP settings...");
+        const server = document.querySelector('input[name="public_rtmp_server_url"]')?.value || $("publicServerUrl")?.value;
+        const key = document.querySelector('input[name="public_stream_key"]')?.value || $("publicStreamKey")?.value;
+        await apiJson(`/api/obs/apply_rtmp?server_url=${encodeURIComponent(server)}&stream_key=${encodeURIComponent(key)}`, {
+          method: "POST",
+          body: "{}",
+        });
+        setMsg("Applied.");
+      } catch (e) {
+        setMsg(e.message || String(e));
+      }
+    });
+  }
+
+  if (startBtn) {
+    startBtn.addEventListener("click", async () => {
+      try {
+        setMsg("Starting stream...");
+        await apiJson("/api/obs/start_stream", { method: "POST", body: "{}" });
+        setMsg("Started.");
+      } catch (e) {
+        setMsg(e.message || String(e));
+      }
+    });
+  }
+
+  if (stopBtn) {
+    stopBtn.addEventListener("click", async () => {
+      try {
+        setMsg("Stopping stream...");
+        await apiJson("/api/obs/stop_stream", { method: "POST", body: "{}" });
+        setMsg("Stopped.");
+      } catch (e) {
+        setMsg(e.message || String(e));
+      }
+    });
+  }
+}
+
+hookSettings();

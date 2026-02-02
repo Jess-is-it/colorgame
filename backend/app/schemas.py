@@ -69,3 +69,33 @@ class ProcessorStatus(BaseModel):
     last_frame_time: dt.datetime | None
     frames_processed: int
     last_error: str | None
+
+
+class AppSettingsOut(BaseModel):
+    backend_stream_url: str
+    public_rtmp_server_url: str | None
+    public_stream_key: str
+
+    obs_ws_enabled: bool
+    obs_ws_host: str
+    obs_ws_port: int
+    obs_ws_password: str | None
+
+    obs_auto_configure_stream: bool
+    obs_auto_start_stream: bool
+    obs_auto_stop_stream: bool
+
+
+class AppSettingsUpdate(BaseModel):
+    backend_stream_url: str | None = None
+    public_rtmp_server_url: str | None = None
+    public_stream_key: str | None = None
+
+    obs_ws_enabled: bool | None = None
+    obs_ws_host: str | None = None
+    obs_ws_port: int | None = None
+    obs_ws_password: str | None = None
+
+    obs_auto_configure_stream: bool | None = None
+    obs_auto_start_stream: bool | None = None
+    obs_auto_stop_stream: bool | None = None

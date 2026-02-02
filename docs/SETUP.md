@@ -13,6 +13,9 @@
 - Server: `rtmp://<VM_IP>:1935/live`
 - Stream key: `stream`
 
+## OBS automation (optional)
+If you install/enable obs-websocket v5 on the OBS host, the app can (optionally) test connectivity and start/stop streaming from the web UI.
+
 ## Ports
 - 1935/tcp: RTMP ingest
 - 8000/tcp: Web UI + API
