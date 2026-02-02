@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
@@ -29,6 +30,7 @@ def get_db():
 BASE_DIR = Path(__file__).resolve().parent
 
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates.env.globals["static_version"] = int(time.time())
 
 app = FastAPI(title="Game Result Recorder")
 

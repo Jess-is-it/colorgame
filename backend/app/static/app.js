@@ -131,6 +131,10 @@ function hookDashboard() {
     prevImg.addEventListener("error", () => {
       setText("previewMsg", "Preview error (stream decode not ready yet).");
     });
+    prevImg.addEventListener("load", () => {
+      // First frame of MJPEG stream usually triggers load; clear the hint.
+      setText("previewMsg", "");
+    });
   }
 
   startBtn.addEventListener("click", async () => {
