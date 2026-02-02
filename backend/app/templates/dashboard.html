@@ -39,36 +39,14 @@
         <span id="detStatus" class="mono">checking…</span>
       </div>
 
-      <div class="row">
-        <button class="btn" id="detSnap">Capture Snapshot</button>
-        <a class="muted" href="/api/detector/snapshot.jpg" target="_blank" rel="noopener">open snapshot</a>
-      </div>
-
-      <div class="row" style="margin-top: 6px;">
-        <span class="muted">ROI draw target:</span>
-        <select id="roiSelect" style="max-width: 180px;">
-          <option value="1">Box 1 (left)</option>
-          <option value="2">Box 2 (middle)</option>
-          <option value="3">Box 3 (right)</option>
-        </select>
-        <span class="muted">Drag on the snapshot to set the box.</span>
-      </div>
-
-      <div class="preview" id="snapWrap" style="margin-top: 10px; position: relative;">
-        <img id="snapshotImg" alt="Snapshot" style="width: 100%; display: block;" />
-        <div id="roiBox1" class="roi-box b1"></div>
-        <div id="roiBox2" class="roi-box b2"></div>
-        <div id="roiBox3" class="roi-box b3"></div>
-        <div id="roiDraw" class="roi-draw"></div>
-      </div>
-
       <div class="row" style="margin-top: 10px;">
-        <span class="muted">ROI Boxes (x,y,w,h) left→right:</span>
+        <button class="btn" id="drawRoi">Draw Box On Video</button>
+        <button class="btn" id="clearRoi">Clear</button>
+        <span class="muted">Draw one rectangle covering all 3 result colors.</span>
       </div>
       <div class="row">
-        <input id="b1" class="mono" placeholder="x,y,w,h" style="max-width: 260px;" />
-        <input id="b2" class="mono" placeholder="x,y,w,h" style="max-width: 260px;" />
-        <input id="b3" class="mono" placeholder="x,y,w,h" style="max-width: 260px;" />
+        <span class="muted">ROI (x,y,w,h):</span>
+        <input id="roiAll" class="mono" placeholder="x,y,w,h" style="max-width: 320px;" />
         <button class="btn" id="detSave">Save ROI</button>
       </div>
 
@@ -131,14 +109,20 @@
   </details>
 
   <div class="preview" style="margin-top: 12px;">
-    <iframe
-      id="playerFrame"
-      title="Live feed"
-      src="{{ webrtc_player_url }}"
-      allow="autoplay; fullscreen; picture-in-picture"
-      allowfullscreen
-      referrerpolicy="no-referrer"
-    ></iframe>
+    <div id="videoWrap" style="position: relative;">
+      <iframe
+        id="playerFrame"
+        title="Live feed"
+        src="{{ webrtc_player_url }}"
+        allow="autoplay; fullscreen; picture-in-picture"
+        allowfullscreen
+        referrerpolicy="no-referrer"
+      ></iframe>
+      <div id="overlay" style="position:absolute; inset:0; pointer-events:none;">
+        <div id="roiBox" class="roi-box b1" style="display:none;"></div>
+        <div id="roiDrawRect" class="roi-draw"></div>
+      </div>
+    </div>
   </div>
 
   <div class="row" style="margin-top: 10px;">
@@ -200,11 +184,9 @@
   async function loadDetConfig() {
     const r = await fetch('/api/detector/config');
     const j = await r.json();
-    const boxes = j.boxes || [];
-    if (boxes.length === 3) {
-      document.getElementById('b1').value = `${boxes[0].x},${boxes[0].y},${boxes[0].w},${boxes[0].h}`;
-      document.getElementById('b2').value = `${boxes[1].x},${boxes[1].y},${boxes[1].w},${boxes[1].h}`;
-      document.getElementById('b3').value = `${boxes[2].x},${boxes[2].y},${boxes[2].w},${boxes[2].h}`;
+    const rr = j.result_roi;
+    if (rr) {
+      document.getElementById('roiAll').value = `${rr.x},${rr.y},${rr.w},${rr.h}`;
     }
     window.__detectorCfg = j;
     renderRois();
@@ -212,29 +194,23 @@
 
   function renderRois() {
     const cfg = window.__detectorCfg || {};
-    const boxes = cfg.boxes || [];
-    const img = document.getElementById('snapshotImg');
-    const wrap = document.getElementById('snapWrap');
-
-    if (!img || !wrap || !img.naturalWidth || !img.naturalHeight || boxes.length !== 3) {
+    const rr = cfg.result_roi;
+    const roiEl = document.getElementById('roiBox');
+    const wrap = document.getElementById('videoWrap');
+    const overlay = document.getElementById('overlay');
+    if (!rr || !roiEl || !wrap || !overlay || !cfg.width || !cfg.height) {
+      if (roiEl) roiEl.style.display = 'none';
       return;
     }
 
-    const rect = img.getBoundingClientRect();
-    const scaleX = rect.width / img.naturalWidth;
-    const scaleY = rect.height / img.naturalHeight;
-
-    function place(el, b) {
-      el.style.left = (b.x * scaleX) + 'px';
-      el.style.top = (b.y * scaleY) + 'px';
-      el.style.width = (b.w * scaleX) + 'px';
-      el.style.height = (b.h * scaleY) + 'px';
-      el.style.display = 'block';
-    }
-
-    place(document.getElementById('roiBox1'), boxes[0]);
-    place(document.getElementById('roiBox2'), boxes[1]);
-    place(document.getElementById('roiBox3'), boxes[2]);
+    const rect = overlay.getBoundingClientRect();
+    const scaleX = rect.width / cfg.width;
+    const scaleY = rect.height / cfg.height;
+    roiEl.style.left = (rr.x * scaleX) + 'px';
+    roiEl.style.top = (rr.y * scaleY) + 'px';
+    roiEl.style.width = (rr.w * scaleX) + 'px';
+    roiEl.style.height = (rr.h * scaleY) + 'px';
+    roiEl.style.display = 'block';
   }
 
   async function pollDet() {
@@ -266,41 +242,56 @@
     await fetch('/api/detector/stop', { method: 'POST' });
   });
   document.getElementById('detSave').addEventListener('click', async () => {
-    const b1 = parseBox(document.getElementById('b1').value);
-    const b2 = parseBox(document.getElementById('b2').value);
-    const b3 = parseBox(document.getElementById('b3').value);
-    if (!b1 || !b2 || !b3) {
+    const rr = parseBox(document.getElementById('roiAll').value);
+    if (!rr) {
       alert('Invalid ROI. Use: x,y,w,h');
       return;
     }
-    const payload = { boxes: [b1, b2, b3] };
+    const payload = { result_roi: rr };
     const r = await fetch('/api/detector/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     window.__detectorCfg = await r.json();
     renderRois();
   });
-  document.getElementById('detSnap').addEventListener('click', async () => {
-    const img = document.getElementById('snapshotImg');
-    img.src = `/api/detector/snapshot.jpg?ts=${Date.now()}`;
+
+  function setDrawMode(on) {
+    const overlay = document.getElementById('overlay');
+    const wrap = document.getElementById('videoWrap');
+    if (!overlay || !wrap) return;
+    overlay.style.pointerEvents = on ? 'auto' : 'none';
+    wrap.style.cursor = on ? 'crosshair' : 'default';
+  }
+
+  document.getElementById('drawRoi').addEventListener('click', () => {
+    setDrawMode(true);
+  });
+  document.getElementById('clearRoi').addEventListener('click', () => {
+    document.getElementById('roiAll').value = '';
+    const roiEl = document.getElementById('roiBox');
+    if (roiEl) roiEl.style.display = 'none';
   });
 
-  // ROI drag-to-set on the snapshot.
-  (function setupRoiDrag() {
-    const img = document.getElementById('snapshotImg');
-    const draw = document.getElementById('roiDraw');
+  // ROI drag-to-set on the live video overlay.
+  (function setupOverlayDrag() {
+    const overlay = document.getElementById('overlay');
+    const draw = document.getElementById('roiDrawRect');
+    if (!overlay || !draw) return;
+
     let dragging = false;
     let startX = 0, startY = 0;
 
-    function toNatural(clientX, clientY) {
-      const r = img.getBoundingClientRect();
-      const x = (clientX - r.left) * (img.naturalWidth / r.width);
-      const y = (clientY - r.top) * (img.naturalHeight / r.height);
-      return { x: Math.max(0, Math.min(img.naturalWidth, x)), y: Math.max(0, Math.min(img.naturalHeight, y)) };
+    function toFrame(clientX, clientY) {
+      const cfg = window.__detectorCfg || {};
+      const r = overlay.getBoundingClientRect();
+      const x = (clientX - r.left) * (cfg.width / r.width);
+      const y = (clientY - r.top) * (cfg.height / r.height);
+      return { x: Math.max(0, Math.min(cfg.width, x)), y: Math.max(0, Math.min(cfg.height, y)) };
     }
 
     function setDrawRect(x0, y0, x1, y1) {
-      const r = img.getBoundingClientRect();
-      const scaleX = r.width / img.naturalWidth;
-      const scaleY = r.height / img.naturalHeight;
+      const cfg = window.__detectorCfg || {};
+      const r = overlay.getBoundingClientRect();
+      const scaleX = r.width / cfg.width;
+      const scaleY = r.height / cfg.height;
       const left = Math.min(x0, x1) * scaleX;
       const top = Math.min(y0, y1) * scaleY;
       const w = Math.abs(x1 - x0) * scaleX;
@@ -312,37 +303,37 @@
       draw.style.display = 'block';
     }
 
-    img.addEventListener('load', () => {
-      renderRois();
-    });
-
-    img.addEventListener('mousedown', (e) => {
-      if (!img.naturalWidth) return;
+    overlay.addEventListener('mousedown', (e) => {
+      const cfg = window.__detectorCfg || {};
+      if (!cfg.width || !cfg.height) return;
       dragging = true;
-      const p = toNatural(e.clientX, e.clientY);
+      const p = toFrame(e.clientX, e.clientY);
       startX = p.x;
       startY = p.y;
       setDrawRect(startX, startY, startX, startY);
     });
+
     window.addEventListener('mousemove', (e) => {
       if (!dragging) return;
-      const p = toNatural(e.clientX, e.clientY);
+      const p = toFrame(e.clientX, e.clientY);
       setDrawRect(startX, startY, p.x, p.y);
     });
-    window.addEventListener('mouseup', async (e) => {
+
+    window.addEventListener('mouseup', (e) => {
       if (!dragging) return;
       dragging = false;
       draw.style.display = 'none';
-      const p = toNatural(e.clientX, e.clientY);
+      const p = toFrame(e.clientX, e.clientY);
       const x0 = Math.round(Math.min(startX, p.x));
       const y0 = Math.round(Math.min(startY, p.y));
       const w = Math.max(1, Math.round(Math.abs(p.x - startX)));
       const h = Math.max(1, Math.round(Math.abs(p.y - startY)));
-      const val = `${x0},${y0},${w},${h}`;
-      const which = document.getElementById('roiSelect').value;
-      if (which === '1') document.getElementById('b1').value = val;
-      if (which === '2') document.getElementById('b2').value = val;
-      if (which === '3') document.getElementById('b3').value = val;
+      document.getElementById('roiAll').value = `${x0},${y0},${w},${h}`;
+      setDrawMode(false);
+      // render locally without saving yet
+      const cfg = window.__detectorCfg || {};
+      cfg.result_roi = { x: x0, y: y0, w, h };
+      window.__detectorCfg = cfg;
       renderRois();
     });
   })();

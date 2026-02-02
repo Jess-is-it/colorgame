@@ -28,12 +28,9 @@ class DetectorConfig:
     width: int = 1920
     height: int = 1080
 
-    # 3 result boxes (left -> right)
-    boxes: Tuple[ROI, ROI, ROI] = (
-        ROI(1250, 35, 105, 85),
-        ROI(1370, 35, 105, 85),
-        ROI(1490, 35, 105, 85),
-    )
+    # One ROI that contains all 3 result color boxes (left -> right).
+    # The detector splits this ROI into 3 equal-width sub-ROIs internally.
+    result_roi: ROI = ROI(1240, 25, 380, 110)
 
     # how many consecutive frames must match before we emit a result
     stable_frames: int = 8
@@ -143,14 +140,32 @@ class ResultDetector:
         try:
             with open(self.config_path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-            boxes = raw.get("boxes") or []
-            if len(boxes) != 3:
-                raise ValueError("config boxes must have length 3")
-            roi_boxes = tuple(ROI(int(b["x"]), int(b["y"]), int(b["w"]), int(b["h"])) for b in boxes)  # type: ignore
+
+            # Backward compat: older configs used explicit 3 boxes. Convert to a single bounding ROI.
+            result_roi_raw = raw.get("result_roi")
+            if result_roi_raw is not None:
+                result_roi = ROI(
+                    int(result_roi_raw["x"]),
+                    int(result_roi_raw["y"]),
+                    int(result_roi_raw["w"]),
+                    int(result_roi_raw["h"]),
+                )
+            else:
+                boxes = raw.get("boxes") or []
+                if len(boxes) != 3:
+                    # fall back to defaults without overwriting file
+                    return DetectorConfig()
+                rois = [ROI(int(b["x"]), int(b["y"]), int(b["w"]), int(b["h"])) for b in boxes]
+                x0 = min(r.x for r in rois)
+                y0 = min(r.y for r in rois)
+                x1 = max(r.x + r.w for r in rois)
+                y1 = max(r.y + r.h for r in rois)
+                result_roi = ROI(x0, y0, x1 - x0, y1 - y0)
+
             return DetectorConfig(
                 width=int(raw.get("width", 1920)),
                 height=int(raw.get("height", 1080)),
-                boxes=roi_boxes,  # type: ignore[arg-type]
+                result_roi=result_roi,
                 stable_frames=int(raw.get("stable_frames", 8)),
                 min_confidence=float(raw.get("min_confidence", 0.35)),
             )
@@ -164,7 +179,7 @@ class ResultDetector:
             "height": cfg.height,
             "stable_frames": cfg.stable_frames,
             "min_confidence": cfg.min_confidence,
-            "boxes": [{"x": b.x, "y": b.y, "w": b.w, "h": b.h} for b in cfg.boxes],
+            "result_roi": {"x": cfg.result_roi.x, "y": cfg.result_roi.y, "w": cfg.result_roi.w, "h": cfg.result_roi.h},
         }
         tmp = self.config_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -179,21 +194,17 @@ class ResultDetector:
             "height": cfg.height,
             "stable_frames": cfg.stable_frames,
             "min_confidence": cfg.min_confidence,
-            "boxes": [{"x": b.x, "y": b.y, "w": b.w, "h": b.h} for b in cfg.boxes],
+            "result_roi": {"x": cfg.result_roi.x, "y": cfg.result_roi.y, "w": cfg.result_roi.w, "h": cfg.result_roi.h},
         }
 
     def set_config(self, payload: dict) -> dict:
-        boxes = payload.get("boxes") or []
-        if len(boxes) != 3:
-            raise ValueError("boxes must have length 3")
+        rr = payload.get("result_roi")
+        if rr is None:
+            raise ValueError("result_roi is required")
         cfg = DetectorConfig(
             width=int(payload.get("width", 1920)),
             height=int(payload.get("height", 1080)),
-            boxes=(
-                ROI(int(boxes[0]["x"]), int(boxes[0]["y"]), int(boxes[0]["w"]), int(boxes[0]["h"])),
-                ROI(int(boxes[1]["x"]), int(boxes[1]["y"]), int(boxes[1]["w"]), int(boxes[1]["h"])),
-                ROI(int(boxes[2]["x"]), int(boxes[2]["y"]), int(boxes[2]["w"]), int(boxes[2]["h"])),
-            ),
+            result_roi=ROI(int(rr["x"]), int(rr["y"]), int(rr["w"]), int(rr["h"])),
             stable_frames=max(1, int(payload.get("stable_frames", 8))),
             min_confidence=float(payload.get("min_confidence", 0.35)),
         )
@@ -330,7 +341,16 @@ class ResultDetector:
         confs: List[float] = []
         debug: List[dict] = []
 
-        for roi in cfg.boxes:
+        # Split a single ROI into 3 equal-width boxes (left -> right).
+        rr = cfg.result_roi
+        thirds = []
+        w3 = max(1, rr.w // 3)
+        for i in range(3):
+            x = rr.x + i * w3
+            w = w3 if i < 2 else rr.w - 2 * w3
+            thirds.append(ROI(x, rr.y, w, rr.h))
+
+        for roi in thirds:
             x0 = max(0, roi.x)
             y0 = max(0, roi.y)
             x1 = min(cfg.width, roi.x + roi.w)

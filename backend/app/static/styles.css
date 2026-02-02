@@ -142,8 +142,6 @@ textarea { resize: vertical; }
   pointer-events: none;
   box-shadow: 0 0 0 1px rgba(0,0,0,0.35) inset;
 }
-.roi-box.b2 { border-color: rgba(46, 196, 182, 0.95); }
-.roi-box.b3 { border-color: rgba(255, 92, 92, 0.95); }
 
 .roi-draw {
   position: absolute;
