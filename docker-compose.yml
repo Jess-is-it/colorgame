@@ -13,5 +13,12 @@ services:
       context: ./backend
     restart: unless-stopped
     network_mode: host
+    environment:
+      # OpenCV reads RTSP; MediaMTX serves RTSP on 8554 when enabled.
+      RTSP_URL: rtsp://127.0.0.1:8554/live/stream
+      DETECTOR_FPS: "10"
+      DETECTOR_CONFIG_PATH: /data/detector_config.json
+    volumes:
+      - ./data:/data
     depends_on:
       - mediamtx

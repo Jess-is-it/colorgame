@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.request
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+from app.detector import ResultDetector
 
 app = FastAPI(title="OBS Stream Dashboard")
 
@@ -16,6 +19,12 @@ templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["static_version"] = int(time.time())
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+RTSP_URL = os.environ.get("RTSP_URL", "rtsp://127.0.0.1:8554/live/stream")
+DETECTOR_FPS = float(os.environ.get("DETECTOR_FPS", "10"))
+DETECTOR_CONFIG_PATH = os.environ.get("DETECTOR_CONFIG_PATH", "/data/detector_config.json")
+
+detector = ResultDetector(rtsp_url=RTSP_URL, fps=DETECTOR_FPS, config_path=DETECTOR_CONFIG_PATH)
 
 
 @app.get("/health")
@@ -45,6 +54,7 @@ def dashboard(request: Request):
             "whip_url": whip_url,
             "webrtc_player_url": webrtc_player_url,
             "stream_path": stream_path,
+            "rtsp_url": RTSP_URL,
         },
     )
 
@@ -106,3 +116,45 @@ def webrtc_sessions():
             return json.loads(body)
     except Exception as e:
         return {"ok": False, "error": str(e), "items": []}
+
+
+@app.get("/api/detector/config")
+def detector_get_config():
+    return detector.get_config()
+
+
+@app.put("/api/detector/config")
+async def detector_set_config(request: Request):
+    payload = await request.json()
+    return detector.set_config(payload)
+
+
+@app.post("/api/detector/start")
+def detector_start():
+    detector.start()
+    return {"ok": True}
+
+
+@app.post("/api/detector/stop")
+def detector_stop():
+    detector.stop()
+    return {"ok": True}
+
+
+@app.get("/api/detector/status")
+def detector_status():
+    return detector.status()
+
+
+@app.get("/api/detector/results")
+def detector_results():
+    return {"items": detector.list_results()}
+
+
+@app.get("/api/detector/snapshot.jpg")
+def detector_snapshot():
+    try:
+        jpg = detector.snapshot_jpeg()
+        return Response(content=jpg, media_type="image/jpeg")
+    except Exception as e:
+        return Response(content=f"snapshot error: {e}\n".encode("utf-8"), media_type="text/plain", status_code=500)

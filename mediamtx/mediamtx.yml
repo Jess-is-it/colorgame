@@ -16,8 +16,8 @@
 logLevel: info
 logDestinations: [stdout]
 
-# Disable protocols we don't need for the MVP dashboard.
-rtsp: no
+# Enable RTSP so OpenCV can ingest frames reliably (OpenCV can't read WebRTC directly).
+rtsp: yes
 hls: no
 srt: no
 
