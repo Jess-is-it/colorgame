@@ -1,0 +1,11 @@
+# Ignore this host's user home artifacts
+.cache/
+.ssh/
+.sudo_as_admin_successful
+.bash_logout
+.bashrc
+.profile
+
+# General
+*.log
+.DS_Store
