@@ -21,10 +21,44 @@
         <th>ROI</th>
         <th style="width: 120px;">Active</th>
         <th style="width: 110px;">Enabled</th>
+        <th style="width: 110px;">Model</th>
         <th style="width: 260px;"></th>
       </tr>
     </thead>
     <tbody id="drawRows"></tbody>
+  </table>
+</section>
+
+<section class="card" id="samplesPanel" style="margin-top: 16px; display:none;">
+  <div class="row between">
+    <div>
+      <h2 style="margin-bottom: 6px;">Training Samples</h2>
+      <div class="muted">Upload labeled screenshots so we can train a per-draw color model.</div>
+      <div class="muted">Draw selected: <span id="samplesDrawName" class="mono"></span></div>
+    </div>
+    <div class="row">
+      <input id="sampleFiles" type="file" multiple accept="image/png,image/jpeg" />
+      <button class="btn" id="uploadBtn">Upload</button>
+      <button class="btn primary" id="trainBtn">Train Model</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <span class="muted">Label each image (left / middle / right colors). Then click Train.</span>
+    <span id="trainMsg" class="mono"></span>
+  </div>
+
+  <table class="table" style="margin-top: 10px;">
+    <thead>
+      <tr>
+        <th style="width: 220px;">Image</th>
+        <th style="width: 160px;">Left</th>
+        <th style="width: 160px;">Middle</th>
+        <th style="width: 160px;">Right</th>
+        <th style="width: 120px;"></th>
+      </tr>
+    </thead>
+    <tbody id="sampleRows"></tbody>
   </table>
 </section>
 
@@ -81,6 +115,7 @@
     activeId: null,
     draws: [],
     editing: null,
+    samplesDrawId: null,
     prevRoi: null,
     mode: 'idle', // idle|draw|move|resize
     activeHandle: null,
@@ -132,10 +167,14 @@
       const tdEnabled = document.createElement('td');
       tdEnabled.innerHTML = `<input type="checkbox" data-act="toggle" data-id="${d.id}" ${d.enabled ? 'checked' : ''} />`;
 
+      const tdModel = document.createElement('td');
+      tdModel.textContent = d.model ? 'trained' : '';
+
       const tdActions = document.createElement('td');
       tdActions.className = 'right';
       tdActions.innerHTML = `
         <button class="btn" data-act="view" data-id="${d.id}">View/Draw</button>
+        <button class="btn" data-act="samples" data-id="${d.id}">Samples</button>
         <button class="btn" data-act="activate" data-id="${d.id}">Use</button>
         <button class="btn danger" data-act="delete" data-id="${d.id}">Delete</button>
       `;
@@ -144,6 +183,7 @@
       tr.appendChild(tdRoi);
       tr.appendChild(tdActive);
       tr.appendChild(tdEnabled);
+      tr.appendChild(tdModel);
       tr.appendChild(tdActions);
       tbody.appendChild(tr);
     }
@@ -277,6 +317,10 @@
       openModal(id);
       return;
     }
+    if (act === 'samples') {
+      openSamples(id);
+      return;
+    }
     if (act === 'activate') {
       await fetch(`/api/draws/${id}/activate`, { method: 'POST' });
       await load();
@@ -291,6 +335,108 @@
   });
 
   document.getElementById('newBtn').addEventListener('click', () => createAndEdit());
+
+  function colorOptionsHtml(selected) {
+    const colors = ['yellow','white','pink','blue','red','green'];
+    const opts = ['<option value=\"\">(unset)</option>'].concat(colors.map(c => `<option value=\"${c}\" ${selected===c?'selected':''}>${c}</option>`));
+    return opts.join('');
+  }
+
+  async function openSamples(drawId) {
+    const d = state.draws.find(x => x.id === drawId);
+    if (!d) return;
+    state.samplesDrawId = drawId;
+    document.getElementById('samplesDrawName').textContent = `${d.name} (${d.id})`;
+    document.getElementById('samplesPanel').style.display = 'block';
+    document.getElementById('trainMsg').textContent = '';
+    await loadSamples();
+  }
+
+  async function loadSamples() {
+    const drawId = state.samplesDrawId;
+    if (!drawId) return;
+    const r = await fetch(`/api/draws/${drawId}/samples`);
+    const j = await r.json();
+    const items = Array.isArray(j.items) ? j.items : [];
+    const tbody = document.getElementById('sampleRows');
+    tbody.innerHTML = '';
+
+    for (const it of items) {
+      const tr = document.createElement('tr');
+      const tdImg = document.createElement('td');
+      tdImg.innerHTML = `<a class=\"muted\" target=\"_blank\" rel=\"noopener\" href=\"/api/draws/${drawId}/samples/${it.id}\">${it.orig_name || it.filename || it.id}</a>`;
+
+      const labels = Array.isArray(it.labels) ? it.labels : ['', '', ''];
+      const tdL = document.createElement('td');
+      const tdM = document.createElement('td');
+      const tdR = document.createElement('td');
+      tdL.innerHTML = `<select data-sel=\"l\" data-id=\"${it.id}\">${colorOptionsHtml(labels[0])}</select>`;
+      tdM.innerHTML = `<select data-sel=\"m\" data-id=\"${it.id}\">${colorOptionsHtml(labels[1])}</select>`;
+      tdR.innerHTML = `<select data-sel=\"r\" data-id=\"${it.id}\">${colorOptionsHtml(labels[2])}</select>`;
+
+      const tdAct = document.createElement('td');
+      tdAct.className = 'right';
+      tdAct.innerHTML = `<button class=\"btn danger\" data-act=\"del-sample\" data-id=\"${it.id}\">Delete</button>`;
+
+      tr.appendChild(tdImg);
+      tr.appendChild(tdL);
+      tr.appendChild(tdM);
+      tr.appendChild(tdR);
+      tr.appendChild(tdAct);
+      tbody.appendChild(tr);
+    }
+  }
+
+  document.getElementById('uploadBtn').addEventListener('click', async () => {
+    const drawId = state.samplesDrawId;
+    if (!drawId) return;
+    const input = document.getElementById('sampleFiles');
+    if (!input.files || input.files.length === 0) return;
+    const fd = new FormData();
+    for (const f of input.files) fd.append('files', f);
+    await fetch(`/api/draws/${drawId}/samples`, { method: 'POST', body: fd });
+    input.value = '';
+    await loadSamples();
+  });
+
+  document.getElementById('trainBtn').addEventListener('click', async () => {
+    const drawId = state.samplesDrawId;
+    if (!drawId) return;
+    document.getElementById('trainMsg').textContent = 'training...';
+    const r = await fetch(`/api/draws/${drawId}/train`, { method: 'POST' });
+    if (!r.ok) {
+      document.getElementById('trainMsg').textContent = `train failed (${r.status})`;
+      return;
+    }
+    const j = await r.json();
+    const cents = (j.model && j.model.centroids) ? Object.keys(j.model.centroids).length : 0;
+    document.getElementById('trainMsg').textContent = `trained: ${cents} colors`;
+    await load();
+  });
+
+  document.getElementById('sampleRows').addEventListener('change', async (e) => {
+    const sel = e.target.closest('select[data-id]');
+    if (!sel) return;
+    const drawId = state.samplesDrawId;
+    if (!drawId) return;
+    const sampleId = sel.getAttribute('data-id');
+    const row = sel.closest('tr');
+    const sels = row.querySelectorAll('select[data-id]');
+    const vals = Array.from(sels).map(s => s.value || '');
+    const labels = (vals.some(v => v === '')) ? null : vals;
+    await fetch(`/api/draws/${drawId}/samples/${sampleId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ labels }) });
+  });
+
+  document.getElementById('sampleRows').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act=\"del-sample\"]');
+    if (!btn) return;
+    const drawId = state.samplesDrawId;
+    if (!drawId) return;
+    const id = btn.getAttribute('data-id');
+    if (!confirm('Delete this sample?')) return;
+    await fetch(`/api/draws/${drawId}/samples/${id}`, { method: 'DELETE' });
+    await loadSamples();
+  });
 
   // draw/move/resize gestures
   (function setupOverlay() {

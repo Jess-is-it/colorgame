@@ -43,6 +43,9 @@ class DetectorConfig:
     # same colors again when RESULT appears again (consecutive games can repeat).
     gap_reset_frames: int = 15
 
+    # Optional trained model from user-labeled samples.
+    model: Optional[dict] = None
+
 
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -119,6 +122,57 @@ class ColorClassifier:
         conf = min(1.0, conf * 1.25)
         return color, conf, {"ratios": ratios, "valid_ratio": float(valid_count) / float(max(1, total))}
 
+    @staticmethod
+    def classify_patch_with_model(patch_bgr: np.ndarray, model: dict) -> Tuple[str, float, Dict[str, float]]:
+        """
+        Model-based classifier trained from user-labeled samples.
+        Model format:
+          { "version": 1, "centroids": { color: { "h": float, "s": float, "v": float, "n": int } } }
+        """
+        if patch_bgr.size == 0:
+            return "unknown", 0.0, {"error": "empty"}
+
+        centroids = (model or {}).get("centroids") or {}
+        if not centroids:
+            return ColorClassifier.classify_patch(patch_bgr)
+
+        hsv = cv2.cvtColor(patch_bgr, cv2.COLOR_BGR2HSV)
+        h = hsv[:, :, 0].astype(np.float32)
+        s = hsv[:, :, 1].astype(np.float32)
+        v = hsv[:, :, 2].astype(np.float32)
+
+        valid = (v > 60) & ((s > 25) | (v > 185))
+        if int(valid.sum()) < max(50, int(h.size * 0.08)):
+            return "unknown", 0.0, {"valid_ratio": float(valid.sum()) / float(max(1, h.size))}
+
+        mh = float(np.mean(h[valid]))
+        ms = float(np.mean(s[valid]))
+        mv = float(np.mean(v[valid]))
+
+        def hue_dist(a: float, b: float) -> float:
+            d = abs(a - b)
+            return min(d, 180.0 - d)
+
+        best_name = "unknown"
+        best_d = 1e9
+        for name, c in centroids.items():
+            try:
+                ch = float(c["h"])
+                cs = float(c["s"])
+                cv = float(c["v"])
+            except Exception:
+                continue
+            d = hue_dist(mh, ch) * 2.0 + abs(ms - cs) * 0.02 + abs(mv - cv) * 0.01
+            if d < best_d:
+                best_d = d
+                best_name = str(name)
+
+        if best_name == "unknown" or best_d >= 40.0:
+            return "unknown", 0.0, {"mh": mh, "ms": ms, "mv": mv, "dist": best_d}
+
+        conf = float(max(0.0, 1.0 - (best_d / 40.0)))
+        return best_name, conf, {"mh": mh, "ms": ms, "mv": mv, "dist": best_d}
+
 
 class ResultDetector:
     def __init__(
@@ -148,6 +202,7 @@ class ResultDetector:
         self._stable_count: int = 0
         self._last_emitted: Optional[Tuple[str, str, str]] = None
         self._gap_count: int = 0
+        self._last_detected_ts: Optional[float] = None
 
     def _load_or_init_config(self) -> DetectorConfig:
         os.makedirs(os.path.dirname(self.config_path) or ".", exist_ok=True)
@@ -191,6 +246,7 @@ class ResultDetector:
                 stable_frames=int(raw.get("stable_frames", 8)),
                 min_confidence=float(raw.get("min_confidence", 0.35)),
                 gap_reset_frames=int(raw.get("gap_reset_frames", 15)),
+                model=raw.get("model"),
             )
         except Exception:
             # fall back to defaults, but don't overwrite user's file automatically
@@ -203,6 +259,7 @@ class ResultDetector:
             "stable_frames": cfg.stable_frames,
             "min_confidence": cfg.min_confidence,
             "gap_reset_frames": cfg.gap_reset_frames,
+            "model": cfg.model,
             "result_roi": (
                 None
                 if cfg.result_roi is None
@@ -223,6 +280,7 @@ class ResultDetector:
             "stable_frames": cfg.stable_frames,
             "min_confidence": cfg.min_confidence,
             "gap_reset_frames": cfg.gap_reset_frames,
+            "model": cfg.model,
             "result_roi": (
                 None
                 if cfg.result_roi is None
@@ -244,6 +302,7 @@ class ResultDetector:
             stable_frames=max(1, int(payload.get("stable_frames", 8))),
             min_confidence=float(payload.get("min_confidence", 0.35)),
             gap_reset_frames=max(1, int(payload.get("gap_reset_frames", 15))),
+            model=payload.get("model"),
         )
         with self._lock:
             self._config = cfg
@@ -265,6 +324,7 @@ class ResultDetector:
             "stable_frames": int(draw.get("stable_frames", 8)),
             "min_confidence": float(draw.get("min_confidence", 0.35)),
             "result_roi": rr,
+            "model": draw.get("model"),
         }
         # reuse validation and reset logic
         self.set_config(payload)
@@ -272,6 +332,7 @@ class ResultDetector:
     def status(self) -> dict:
         with self._lock:
             last = self._results[-1] if self._results else None
+            cfg = self._config
             return {
                 "running": self._thread is not None and self._thread.is_alive(),
                 "connected": self._connected,
@@ -279,6 +340,16 @@ class ResultDetector:
                 "last_frame_time": self._last_frame_ts,
                 "last_error": self._last_error,
                 "last_result": last,
+                "last_detected_time": self._last_detected_ts,
+                "config": {
+                    "width": cfg.width,
+                    "height": cfg.height,
+                    "result_roi": (
+                        None
+                        if cfg.result_roi is None
+                        else {"x": cfg.result_roi.x, "y": cfg.result_roi.y, "w": cfg.result_roi.w, "h": cfg.result_roi.h}
+                    ),
+                },
             }
 
     def list_results(self) -> List[dict]:
@@ -368,6 +439,7 @@ class ResultDetector:
                         continue
                     else:
                         self._gap_count = 0
+                        self._last_detected_ts = time.time()
 
                     # stability gate
                     emit = False
@@ -442,7 +514,10 @@ class ResultDetector:
             cx1, cy1 = int(pw * 0.82), int(ph * 0.82)
             inner = patch[cy0:cy1, cx0:cx1]
 
-            name, conf, extra = ColorClassifier.classify_patch(inner)
+            if cfg.model:
+                name, conf, extra = ColorClassifier.classify_patch_with_model(inner, cfg.model)
+            else:
+                name, conf, extra = ColorClassifier.classify_patch(inner)
             colors.append(name)
             confs.append(conf)
             debug.append(

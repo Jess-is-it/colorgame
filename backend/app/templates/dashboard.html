@@ -15,14 +15,17 @@
     </div>
 
     <div class="preview" style="margin-top: 12px;">
-      <iframe
-        id="playerFrame"
-        title="Live feed"
-        src="{{ webrtc_player_url }}"
-        allow="autoplay; fullscreen; picture-in-picture"
-        allowfullscreen
-        referrerpolicy="no-referrer"
-      ></iframe>
+      <div id="liveWrap" style="position: relative;">
+        <iframe
+          id="playerFrame"
+          title="Live feed"
+          src="{{ webrtc_player_url }}"
+          allow="autoplay; fullscreen; picture-in-picture"
+          allowfullscreen
+          referrerpolicy="no-referrer"
+        ></iframe>
+        <div id="detectRect" style="position:absolute; display:none; border:3px solid rgba(46,196,182,0.95); border-radius:12px; box-shadow:0 0 0 2px rgba(0,0,0,0.25) inset; pointer-events:none;"></div>
+      </div>
     </div>
     <div class="row" style="margin-top: 10px;">
       <a class="muted" href="{{ webrtc_player_url }}" target="_blank" rel="noopener">Open player in new tab</a>
@@ -154,12 +157,35 @@
       const lr = j.last_result;
       document.getElementById('latestColors').textContent = lr ? lr.colors.join(', ') : '';
       document.getElementById('latestTime').textContent = lr ? fmtPh(lr.timestamp) : '';
+
+      // Show a rectangle on the live player when detection is currently happening.
+      // We treat "detected" as "we saw a valid RESULT ROI recently".
+      const detRect = document.getElementById('detectRect');
+      const wrap = document.getElementById('liveWrap');
+      const cfg = j.config || {};
+      const rr = cfg.result_roi || null;
+      const lastDet = (typeof j.last_detected_time === 'number') ? j.last_detected_time : null;
+      const isHot = lastDet !== null && ((Date.now() / 1000) - lastDet) < 1.2;
+      if (rr && isHot && wrap) {
+        const rect = wrap.getBoundingClientRect();
+        const scaleX = rect.width / (cfg.width || 1920);
+        const scaleY = rect.height / (cfg.height || 1080);
+        detRect.style.left = (rr.x * scaleX) + 'px';
+        detRect.style.top = (rr.y * scaleY) + 'px';
+        detRect.style.width = (rr.w * scaleX) + 'px';
+        detRect.style.height = (rr.h * scaleY) + 'px';
+        detRect.style.display = 'block';
+      } else {
+        detRect.style.display = 'none';
+      }
     } catch (_) {
       document.getElementById('detStatus').textContent = 'unknown';
       document.getElementById('activeDraw').textContent = 'unknown';
       document.getElementById('latestColors').textContent = '';
       document.getElementById('latestTime').textContent = '';
       document.getElementById('detError').textContent = '';
+      const detRect = document.getElementById('detectRect');
+      if (detRect) detRect.style.display = 'none';
     }
 
     try {

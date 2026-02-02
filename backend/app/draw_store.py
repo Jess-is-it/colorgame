@@ -60,6 +60,7 @@ class DrawStore:
                     "stable_frames": 8,
                     "min_confidence": 0.35,
                     "enabled": True,
+                    "model": None,
                     "result_roi": None,
                     "created_at": now,
                     "updated_at": now,
@@ -85,6 +86,9 @@ class DrawStore:
                 if "enabled" not in d:
                     d["enabled"] = True
                     changed = True
+                if "model" not in d:
+                    d["model"] = None
+                    changed = True
 
             if not self._state["draws"]:
                 now = _now_ts()
@@ -96,6 +100,7 @@ class DrawStore:
                     "stable_frames": 8,
                     "min_confidence": 0.35,
                     "enabled": True,
+                    "model": None,
                     "result_roi": None,
                     "created_at": now,
                     "updated_at": now,
@@ -151,6 +156,7 @@ class DrawStore:
             "stable_frames": 8,
             "min_confidence": 0.35,
             "enabled": True,
+            "model": None,
             "result_roi": None,
             "created_at": now,
             "updated_at": now,
@@ -180,6 +186,9 @@ class DrawStore:
                     d["min_confidence"] = float(patch["min_confidence"])
                 if "enabled" in patch:
                     d["enabled"] = bool(patch["enabled"])
+                if "model" in patch:
+                    # stored as JSON-serializable dict or None
+                    d["model"] = patch["model"]
                 if "result_roi" in patch:
                     rr = patch["result_roi"]
                     if rr is None:
