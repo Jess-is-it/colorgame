@@ -33,12 +33,9 @@ webrtcLocalUDPAddress: :8189
 # Optional TCP fallback for networks that block UDP.
 webrtcLocalTCPAddress: :8189
 
-# Avoid advertising docker bridge / loopback addresses.
-# Pick the VM LAN interface IP(s) only. On this VM it's typically `enp0s3`.
-webrtcIPsFromInterfaces: yes
-webrtcIPsFromInterfacesList: [enp0s3]
-
-# If the server is in a VM/container/NAT, explicitly advertise the LAN IP that clients use.
+# Avoid advertising loopback/docker bridge candidates; explicitly advertise the VM LAN IP.
+# This is the IP your client machine uses to reach the VM.
+webrtcIPsFromInterfaces: no
 webrtcAdditionalHosts: [192.168.50.199]
 
 api: yes
