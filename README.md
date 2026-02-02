@@ -44,6 +44,7 @@ The dashboard embeds the MediaMTX WebRTC player (low latency):
 - `1935/tcp` RTMP ingest (OBS -> VM)
 - `8889/tcp` WebRTC HTTP (player + WHEP)
 - `8189/udp` WebRTC ICE/media
+- `8189/tcp` WebRTC ICE/media (TCP fallback)
 
 If you have a firewall on the VM, make sure these ports are allowed.
 

@@ -30,6 +30,8 @@ webrtcEncryption: no
 webrtcAllowOrigins: ['*']
 # fixed UDP port makes firewalling easy
 webrtcLocalUDPAddress: :8189
+# Optional TCP fallback for networks that block UDP.
+webrtcLocalTCPAddress: :8189
 
 api: yes
 apiAddress: :9997
