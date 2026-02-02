@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from app import crud, schemas
 from app.db import SessionLocal
 from app.services import obs_integration
+from app.services import preview as preview_service
+from app.services import rtmp_status as rtmp_status_service
 from app.services.processor import processor_manager
 
 
@@ -36,10 +38,20 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 def dashboard(request: Request, db: Session = Depends(get_db)):
     presets = crud.list_presets(db)
     status = processor_manager.status()
+    s = crud.get_app_settings(db)
+
+    host = (request.headers.get("host") or "").split(",")[0].strip()
+    hostname = host.split(":")[0] if host else "VM_IP"
+    public_server_url = s.public_rtmp_server_url or f"rtmp://{hostname}:1935/live"
     return templates.TemplateResponse(
         request,
         "dashboard.html",
-        {"presets": presets, "status": status.model_dump()},
+        {
+            "presets": presets,
+            "status": status.model_dump(),
+            "public_server_url": public_server_url,
+            "public_stream_key": s.public_stream_key,
+        },
     )
 
 
@@ -243,6 +255,25 @@ def api_list_results(preset_id: int | None = None, limit: int = 100, db: Session
 @app.get("/api/status", response_model=schemas.ProcessorStatus)
 def api_status():
     return processor_manager.status()
+
+
+@app.get("/api/rtmp/status")
+def api_rtmp_status():
+    # rtmp container exposes /stat on port 80 inside the compose network.
+    try:
+        return rtmp_status_service.get_publish_status(stat_url="http://rtmp/stat", expected_app="live")
+    except Exception as e:
+        return {"ok": False, "error": str(e), "publishing": False, "streams": []}
+
+
+@app.get("/api/preview.jpg")
+def api_preview_jpg(db: Session = Depends(get_db)):
+    s = crud.get_app_settings(db)
+    preview_service.preview_worker.ensure_running(s.backend_stream_url)
+    jpeg, meta = preview_service.preview_worker.get_latest_jpeg(max_age_s=5.0)
+    if jpeg is None:
+        raise HTTPException(status_code=503, detail=meta.get("last_error") or "No preview frame yet")
+    return Response(content=jpeg, media_type="image/jpeg")
 
 
 @app.get("/api/settings", response_model=schemas.AppSettingsOut)

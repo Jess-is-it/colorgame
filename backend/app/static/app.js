@@ -59,6 +59,8 @@ function renderResults(rows) {
     .join("");
 }
 
+let previewLastTs = 0;
+
 async function refreshStatusAndResults() {
   const status = await apiJson("/api/status");
 
@@ -68,6 +70,32 @@ async function refreshStatusAndResults() {
   setText("stFrames", String(status.frames_processed));
   setText("stLastFrame", status.last_frame_time ? fmtTime(status.last_frame_time) : "-");
   setText("stLastError", status.last_error ?? "-");
+
+  // RTMP publish status (works even if processing is stopped)
+  try {
+    const rtmp = await apiJson("/api/rtmp/status");
+    const pub = !!rtmp.publishing;
+    setText("rtmpPublish", pub ? "publishing" : "not publishing");
+
+    // If OBS is publishing, update preview image occasionally.
+    const img = $("previewImg");
+    const msg = $("previewMsg");
+    if (img) {
+      if (pub) {
+        const now = Date.now();
+        if (now - previewLastTs > 1500) {
+          img.src = `/api/preview.jpg?t=${now}`;
+          previewLastTs = now;
+        }
+        if (msg) msg.textContent = "";
+      } else {
+        img.removeAttribute("src");
+        if (msg) msg.textContent = "Preview appears when RTMP is publishing.";
+      }
+    }
+  } catch (_) {
+    setText("rtmpPublish", "unknown");
+  }
 
   const selectedPresetId = $("presetSelect")?.value || "";
   const presetIdForResults = status.running ? status.preset_id : (selectedPresetId ? Number(selectedPresetId) : null);
@@ -100,6 +128,13 @@ function hookDashboard() {
   const startBtn = $("startBtn");
   const stopBtn = $("stopBtn");
   if (!startBtn || !stopBtn) return;
+
+  const prevImg = $("previewImg");
+  if (prevImg) {
+    prevImg.addEventListener("error", () => {
+      setText("previewMsg", "Preview error (backend couldn't grab a frame yet).");
+    });
+  }
 
   startBtn.addEventListener("click", async () => {
     try {

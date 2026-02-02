@@ -118,6 +118,26 @@ textarea { resize: vertical; }
 
 .pre { white-space: pre-wrap; max-width: 520px; }
 
+.preview {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.preview img {
+  width: 100%;
+  display: block;
+  max-height: 360px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.preview #previewMsg {
+  padding: 10px;
+}
+
 .status {
   display: grid;
   grid-template-columns: 1fr;

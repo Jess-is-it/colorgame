@@ -5,6 +5,16 @@
     <h2>Processing</h2>
 
     <div class="row">
+      <span class="muted">OBS -> RTMP:</span>
+      <span id="rtmpPublish" class="mono">checking...</span>
+      <span class="muted">Server:</span>
+      <span class="mono">{{ public_server_url }}</span>
+      <span class="muted">Key:</span>
+      <span class="mono">{{ public_stream_key }}</span>
+      <a class="muted" href="/settings">settings</a>
+    </div>
+
+    <div class="row">
       <label>Preset</label>
       <select id="presetSelect">
         <option value="">-- Select --</option>
@@ -46,7 +56,13 @@
   </section>
 
   <section class="card">
-    <h2>Latest Results</h2>
+    <h2>Live Preview + Latest Results</h2>
+    <div class="row">
+      <div class="preview">
+        <img id="previewImg" alt="Stream preview" />
+        <div id="previewMsg" class="muted">Preview appears when RTMP is publishing.</div>
+      </div>
+    </div>
     <div class="row">
       <span class="muted">Auto-refreshes while processing.</span>
     </div>
