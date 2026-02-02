@@ -119,7 +119,16 @@
         referrerpolicy="no-referrer"
       ></iframe>
       <div id="overlay" style="position:absolute; inset:0; pointer-events:none;">
-        <div id="roiBox" class="roi-box b1" style="display:none;"></div>
+        <div id="roiBox" class="roi-box b1" style="display:none;">
+          <div class="roi-handle nw" data-h="nw"></div>
+          <div class="roi-handle n" data-h="n"></div>
+          <div class="roi-handle ne" data-h="ne"></div>
+          <div class="roi-handle e" data-h="e"></div>
+          <div class="roi-handle se" data-h="se"></div>
+          <div class="roi-handle s" data-h="s"></div>
+          <div class="roi-handle sw" data-h="sw"></div>
+          <div class="roi-handle w" data-h="w"></div>
+        </div>
         <div id="roiDrawRect" class="roi-draw"></div>
       </div>
     </div>
@@ -129,6 +138,26 @@
     <a class="muted" href="{{ webrtc_player_url }}" target="_blank" rel="noopener">Open player in new tab</a>
   </div>
 </section>
+
+<div id="drawBackdrop" class="modal-backdrop"></div>
+<div id="drawModal" class="modal">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Draw Result Box</div>
+        <div class="muted">Drag to draw. Then move/resize the rectangle. Covers all 3 result colors.</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="modalClear">Clear</button>
+        <button class="btn" id="modalCancel">Cancel</button>
+        <button class="btn primary" id="modalSave">Save</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="preview" id="modalVideoHost" style="position: relative;"></div>
+    </div>
+  </div>
+</div>
 
 <script>
   async function pollStatus() {
@@ -258,11 +287,14 @@
     const wrap = document.getElementById('videoWrap');
     if (!overlay || !wrap) return;
     overlay.style.pointerEvents = on ? 'auto' : 'none';
-    wrap.style.cursor = on ? 'crosshair' : 'default';
+    // Pencil-ish cursor (fallback to crosshair).
+    overlay.style.cursor = on
+      ? 'url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 width=%2728%27 height=%2728%27 viewBox=%270 0 28 28%27><path fill=%27white%27 stroke=%27black%27 stroke-width=%271.5%27 d=%27M3 21l2.5 4L9 22.5 21.5 10 18 6.5 5.5 19z%27/><path fill=%27%23ffd166%27 stroke=%27black%27 stroke-width=%271.5%27 d=%27M18 6.5L21.5 10 24 7.5 20.5 4z%27/></svg>") 2 26, crosshair'
+      : 'default';
   }
 
   document.getElementById('drawRoi').addEventListener('click', () => {
-    setDrawMode(true);
+    openDrawModal();
   });
   document.getElementById('clearRoi').addEventListener('click', () => {
     document.getElementById('roiAll').value = '';
@@ -270,71 +302,269 @@
     if (roiEl) roiEl.style.display = 'none';
   });
 
-  // ROI drag-to-set on the live video overlay.
-  (function setupOverlayDrag() {
+  // Modal ROI draw + move/resize.
+  (function setupRoiModal() {
+    const modal = document.getElementById('drawModal');
+    const backdrop = document.getElementById('drawBackdrop');
+    const host = document.getElementById('modalVideoHost');
     const overlay = document.getElementById('overlay');
-    const draw = document.getElementById('roiDrawRect');
-    if (!overlay || !draw) return;
+    const roiBox = document.getElementById('roiBox');
+    const drawRect = document.getElementById('roiDrawRect');
+    const videoWrap = document.getElementById('videoWrap');
 
-    let dragging = false;
-    let startX = 0, startY = 0;
+    let origParent = null;
+    let origNext = null;
+    let prevRoi = null;
 
-    function toFrame(clientX, clientY) {
-      const cfg = window.__detectorCfg || {};
-      const r = overlay.getBoundingClientRect();
-      const x = (clientX - r.left) * (cfg.width / r.width);
-      const y = (clientY - r.top) * (cfg.height / r.height);
-      return { x: Math.max(0, Math.min(cfg.width, x)), y: Math.max(0, Math.min(cfg.height, y)) };
+    let mode = 'idle'; // idle|draw|move|resize
+    let activeHandle = null;
+    let startPt = null;
+    let startRoi = null;
+
+    function getCfg() { return window.__detectorCfg || {}; }
+
+    function currentRoi() {
+      const cfg = getCfg();
+      if (cfg && cfg.result_roi) return cfg.result_roi;
+      const rr = parseBox(document.getElementById('roiAll').value);
+      return rr;
     }
 
-    function setDrawRect(x0, y0, x1, y1) {
-      const cfg = window.__detectorCfg || {};
+    function clampRoi(r) {
+      const cfg = getCfg();
+      const W = cfg.width || 1920;
+      const H = cfg.height || 1080;
+      const x = Math.max(0, Math.min(W - 1, r.x));
+      const y = Math.max(0, Math.min(H - 1, r.y));
+      const w = Math.max(1, Math.min(W - x, r.w));
+      const h = Math.max(1, Math.min(H - y, r.h));
+      return { x, y, w, h };
+    }
+
+    function toFrame(clientX, clientY) {
+      const cfg = getCfg();
+      const r = overlay.getBoundingClientRect();
+      const x = (clientX - r.left) * ((cfg.width || 1920) / r.width);
+      const y = (clientY - r.top) * ((cfg.height || 1080) / r.height);
+      const W = cfg.width || 1920;
+      const H = cfg.height || 1080;
+      return { x: Math.max(0, Math.min(W, x)), y: Math.max(0, Math.min(H, y)) };
+    }
+
+    function renderBox(r) {
+      const cfg = getCfg();
+      const rect = overlay.getBoundingClientRect();
+      const scaleX = rect.width / cfg.width;
+      const scaleY = rect.height / cfg.height;
+      roiBox.style.left = (r.x * scaleX) + 'px';
+      roiBox.style.top = (r.y * scaleY) + 'px';
+      roiBox.style.width = (r.w * scaleX) + 'px';
+      roiBox.style.height = (r.h * scaleY) + 'px';
+      roiBox.style.display = 'block';
+    }
+
+    function hideBox() {
+      roiBox.style.display = 'none';
+    }
+
+    function open() {
+      const cfg = getCfg();
+      if (!cfg.width || !cfg.height) return;
+
+      prevRoi = currentRoi() ? { ...currentRoi() } : null;
+
+      // Move the existing live video into the modal so user draws on the real feed.
+      origParent = videoWrap.parentNode;
+      origNext = videoWrap.nextSibling;
+      host.appendChild(videoWrap);
+
+      backdrop.classList.add('open');
+      modal.classList.add('open');
+
+      setDrawMode(true);
+      // show existing ROI if present
+      if (prevRoi) renderBox(prevRoi);
+    }
+
+    function close(restorePrev) {
+      // restore live video back to the page
+      if (origParent) {
+        if (origNext) origParent.insertBefore(videoWrap, origNext);
+        else origParent.appendChild(videoWrap);
+      }
+      backdrop.classList.remove('open');
+      modal.classList.remove('open');
+      setDrawMode(false);
+      mode = 'idle';
+      activeHandle = null;
+      startPt = null;
+      startRoi = null;
+      drawRect.style.display = 'none';
+
+      if (restorePrev) {
+        const cfg = getCfg();
+        cfg.result_roi = prevRoi;
+        window.__detectorCfg = cfg;
+        document.getElementById('roiAll').value = prevRoi ? `${prevRoi.x},${prevRoi.y},${prevRoi.w},${prevRoi.h}` : '';
+      }
+      renderRois();
+    }
+
+    function saveAndClose() {
+      const rr = currentRoi();
+      if (!rr) {
+        alert('Draw a box first (or Clear then Cancel).');
+        return;
+      }
+      const payload = { result_roi: rr };
+      fetch('/api/detector/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+        .then(r => r.json())
+        .then(j => {
+          window.__detectorCfg = j;
+          document.getElementById('roiAll').value = `${j.result_roi.x},${j.result_roi.y},${j.result_roi.w},${j.result_roi.h}`;
+          close(false);
+        })
+        .catch(() => close(false));
+    }
+
+    function clearRoi() {
+      const cfg = getCfg();
+      cfg.result_roi = null;
+      window.__detectorCfg = cfg;
+      document.getElementById('roiAll').value = '';
+      hideBox();
+    }
+
+    // Expose open for the button handler.
+    window.openDrawModal = open;
+
+    document.getElementById('modalCancel').addEventListener('click', () => close(true));
+    backdrop.addEventListener('click', () => close(true));
+    document.getElementById('modalClear').addEventListener('click', () => clearRoi());
+    document.getElementById('modalSave').addEventListener('click', () => saveAndClose());
+
+    function setTempDrawRect(a, b) {
+      const cfg = getCfg();
       const r = overlay.getBoundingClientRect();
       const scaleX = r.width / cfg.width;
       const scaleY = r.height / cfg.height;
-      const left = Math.min(x0, x1) * scaleX;
-      const top = Math.min(y0, y1) * scaleY;
-      const w = Math.abs(x1 - x0) * scaleX;
-      const h = Math.abs(y1 - y0) * scaleY;
-      draw.style.left = left + 'px';
-      draw.style.top = top + 'px';
-      draw.style.width = w + 'px';
-      draw.style.height = h + 'px';
-      draw.style.display = 'block';
+      const left = Math.min(a.x, b.x) * scaleX;
+      const top = Math.min(a.y, b.y) * scaleY;
+      const w = Math.abs(b.x - a.x) * scaleX;
+      const h = Math.abs(b.y - a.y) * scaleY;
+      drawRect.style.left = left + 'px';
+      drawRect.style.top = top + 'px';
+      drawRect.style.width = w + 'px';
+      drawRect.style.height = h + 'px';
+      drawRect.style.display = 'block';
+    }
+
+    function handleFromTarget(t) {
+      const el = t && t.closest ? t.closest('.roi-handle') : null;
+      return el ? el.getAttribute('data-h') : null;
     }
 
     overlay.addEventListener('mousedown', (e) => {
-      const cfg = window.__detectorCfg || {};
+      const cfg = getCfg();
+      if (!modal.classList.contains('open')) return;
       if (!cfg.width || !cfg.height) return;
-      dragging = true;
-      const p = toFrame(e.clientX, e.clientY);
-      startX = p.x;
-      startY = p.y;
-      setDrawRect(startX, startY, startX, startY);
+
+      const h = handleFromTarget(e.target);
+      const rr = currentRoi();
+      const pt = toFrame(e.clientX, e.clientY);
+
+      if (h && rr) {
+        mode = 'resize';
+        activeHandle = h;
+        startPt = pt;
+        startRoi = { ...rr };
+        e.preventDefault();
+        return;
+      }
+
+      // move if click inside existing box (but not on handle)
+      if (rr && roiBox.style.display !== 'none') {
+        const boxRect = roiBox.getBoundingClientRect();
+        if (e.clientX >= boxRect.left && e.clientX <= boxRect.right && e.clientY >= boxRect.top && e.clientY <= boxRect.bottom) {
+          mode = 'move';
+          startPt = pt;
+          startRoi = { ...rr };
+          e.preventDefault();
+          return;
+        }
+      }
+
+      // start drawing a new ROI
+      mode = 'draw';
+      startPt = pt;
+      drawRect.style.display = 'block';
+      setTempDrawRect(pt, pt);
+      e.preventDefault();
     });
 
     window.addEventListener('mousemove', (e) => {
-      if (!dragging) return;
-      const p = toFrame(e.clientX, e.clientY);
-      setDrawRect(startX, startY, p.x, p.y);
+      if (!modal.classList.contains('open')) return;
+      if (!startPt) return;
+      const cfg = getCfg();
+      if (!cfg.width || !cfg.height) return;
+      const pt = toFrame(e.clientX, e.clientY);
+
+      if (mode === 'draw') {
+        setTempDrawRect(startPt, pt);
+      } else if (mode === 'move' && startRoi) {
+        const dx = pt.x - startPt.x;
+        const dy = pt.y - startPt.y;
+        const rr = clampRoi({ x: Math.round(startRoi.x + dx), y: Math.round(startRoi.y + dy), w: startRoi.w, h: startRoi.h });
+        const cfg2 = getCfg();
+        cfg2.result_roi = rr;
+        window.__detectorCfg = cfg2;
+        renderBox(rr);
+      } else if (mode === 'resize' && startRoi) {
+        let x = startRoi.x, y = startRoi.y, w = startRoi.w, h = startRoi.h;
+        const dx = pt.x - startPt.x;
+        const dy = pt.y - startPt.y;
+        const minSize = 10;
+
+        const ah = activeHandle;
+        if (ah.includes('e')) w = Math.max(minSize, Math.round(startRoi.w + dx));
+        if (ah.includes('s')) h = Math.max(minSize, Math.round(startRoi.h + dy));
+        if (ah.includes('w')) { x = Math.round(startRoi.x + dx); w = Math.max(minSize, Math.round(startRoi.w - dx)); }
+        if (ah.includes('n')) { y = Math.round(startRoi.y + dy); h = Math.max(minSize, Math.round(startRoi.h - dy)); }
+
+        const rr = clampRoi({ x, y, w, h });
+        const cfg2 = getCfg();
+        cfg2.result_roi = rr;
+        window.__detectorCfg = cfg2;
+        renderBox(rr);
+      }
     });
 
     window.addEventListener('mouseup', (e) => {
-      if (!dragging) return;
-      dragging = false;
-      draw.style.display = 'none';
-      const p = toFrame(e.clientX, e.clientY);
-      const x0 = Math.round(Math.min(startX, p.x));
-      const y0 = Math.round(Math.min(startY, p.y));
-      const w = Math.max(1, Math.round(Math.abs(p.x - startX)));
-      const h = Math.max(1, Math.round(Math.abs(p.y - startY)));
-      document.getElementById('roiAll').value = `${x0},${y0},${w},${h}`;
-      setDrawMode(false);
-      // render locally without saving yet
-      const cfg = window.__detectorCfg || {};
-      cfg.result_roi = { x: x0, y: y0, w, h };
-      window.__detectorCfg = cfg;
-      renderRois();
+      if (!modal.classList.contains('open')) return;
+      if (!startPt) return;
+      const cfg = getCfg();
+      const pt = toFrame(e.clientX, e.clientY);
+
+      if (mode === 'draw') {
+        drawRect.style.display = 'none';
+        const x0 = Math.round(Math.min(startPt.x, pt.x));
+        const y0 = Math.round(Math.min(startPt.y, pt.y));
+        const w = Math.max(10, Math.round(Math.abs(pt.x - startPt.x)));
+        const h = Math.max(10, Math.round(Math.abs(pt.y - startPt.y)));
+        const rr = clampRoi({ x: x0, y: y0, w, h });
+        cfg.result_roi = rr;
+        window.__detectorCfg = cfg;
+        document.getElementById('roiAll').value = `${rr.x},${rr.y},${rr.w},${rr.h}`;
+        renderBox(rr);
+      } else if (mode === 'move' || mode === 'resize') {
+        const rr = currentRoi();
+        if (rr) document.getElementById('roiAll').value = `${rr.x},${rr.y},${rr.w},${rr.h}`;
+      }
+
+      mode = 'idle';
+      activeHandle = null;
+      startPt = null;
+      startRoi = null;
     });
   })();
 

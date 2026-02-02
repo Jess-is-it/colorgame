@@ -30,7 +30,8 @@ class DetectorConfig:
 
     # One ROI that contains all 3 result color boxes (left -> right).
     # The detector splits this ROI into 3 equal-width sub-ROIs internally.
-    result_roi: ROI = ROI(1240, 25, 380, 110)
+    # Can be None until the user calibrates.
+    result_roi: Optional[ROI] = ROI(1240, 25, 380, 110)
 
     # how many consecutive frames must match before we emit a result
     stable_frames: int = 8
@@ -142,14 +143,18 @@ class ResultDetector:
                 raw = json.load(f)
 
             # Backward compat: older configs used explicit 3 boxes. Convert to a single bounding ROI.
-            result_roi_raw = raw.get("result_roi")
-            if result_roi_raw is not None:
-                result_roi = ROI(
-                    int(result_roi_raw["x"]),
-                    int(result_roi_raw["y"]),
-                    int(result_roi_raw["w"]),
-                    int(result_roi_raw["h"]),
-                )
+            # NOTE: config can explicitly set result_roi to null.
+            if "result_roi" in raw:
+                result_roi_raw = raw.get("result_roi")
+                if result_roi_raw is None:
+                    result_roi = None
+                else:
+                    result_roi = ROI(
+                        int(result_roi_raw["x"]),
+                        int(result_roi_raw["y"]),
+                        int(result_roi_raw["w"]),
+                        int(result_roi_raw["h"]),
+                    )
             else:
                 boxes = raw.get("boxes") or []
                 if len(boxes) != 3:
@@ -179,7 +184,11 @@ class ResultDetector:
             "height": cfg.height,
             "stable_frames": cfg.stable_frames,
             "min_confidence": cfg.min_confidence,
-            "result_roi": {"x": cfg.result_roi.x, "y": cfg.result_roi.y, "w": cfg.result_roi.w, "h": cfg.result_roi.h},
+            "result_roi": (
+                None
+                if cfg.result_roi is None
+                else {"x": cfg.result_roi.x, "y": cfg.result_roi.y, "w": cfg.result_roi.w, "h": cfg.result_roi.h}
+            ),
         }
         tmp = self.config_path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
@@ -194,17 +203,24 @@ class ResultDetector:
             "height": cfg.height,
             "stable_frames": cfg.stable_frames,
             "min_confidence": cfg.min_confidence,
-            "result_roi": {"x": cfg.result_roi.x, "y": cfg.result_roi.y, "w": cfg.result_roi.w, "h": cfg.result_roi.h},
+            "result_roi": (
+                None
+                if cfg.result_roi is None
+                else {"x": cfg.result_roi.x, "y": cfg.result_roi.y, "w": cfg.result_roi.w, "h": cfg.result_roi.h}
+            ),
         }
 
     def set_config(self, payload: dict) -> dict:
-        rr = payload.get("result_roi")
-        if rr is None:
-            raise ValueError("result_roi is required")
+        rr = payload.get("result_roi", "MISSING")
+        if rr == "MISSING":
+            raise ValueError("result_roi is required (can be null to clear)")
+        result_roi = None
+        if rr is not None:
+            result_roi = ROI(int(rr["x"]), int(rr["y"]), int(rr["w"]), int(rr["h"]))
         cfg = DetectorConfig(
             width=int(payload.get("width", 1920)),
             height=int(payload.get("height", 1080)),
-            result_roi=ROI(int(rr["x"]), int(rr["y"]), int(rr["w"]), int(rr["h"])),
+            result_roi=result_roi,
             stable_frames=max(1, int(payload.get("stable_frames", 8))),
             min_confidence=float(payload.get("min_confidence", 0.35)),
         )
@@ -340,6 +356,9 @@ class ResultDetector:
         colors: List[str] = []
         confs: List[float] = []
         debug: List[dict] = []
+
+        if cfg.result_roi is None:
+            return ["unknown", "unknown", "unknown"], [0.0, 0.0, 0.0], [{"error": "result_roi not set"}]
 
         # Split a single ROI into 3 equal-width boxes (left -> right).
         rr = cfg.result_roi
