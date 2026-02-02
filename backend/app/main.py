@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.detector import ResultDetector
+from app.draw_store import DrawStore
 
 app = FastAPI(title="OBS Stream Dashboard")
 
@@ -22,9 +23,18 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 RTSP_URL = os.environ.get("RTSP_URL", "rtsp://127.0.0.1:8554/live/stream")
 DETECTOR_FPS = float(os.environ.get("DETECTOR_FPS", "10"))
-DETECTOR_CONFIG_PATH = os.environ.get("DETECTOR_CONFIG_PATH", "/data/detector_config.json")
+DRAWS_PATH = os.environ.get("DRAWS_PATH", "/data/draws.json")
 
-detector = ResultDetector(rtsp_url=RTSP_URL, fps=DETECTOR_FPS, config_path=DETECTOR_CONFIG_PATH)
+draws = DrawStore(path=DRAWS_PATH)
+detector = ResultDetector(rtsp_url=RTSP_URL, fps=DETECTOR_FPS, config_path="/tmp/detector_config.json")
+
+# Apply active draw into the detector on startup.
+try:
+    active_draw = draws.active()
+    if active_draw is not None:
+        detector.apply_draw_record(active_draw)
+except Exception:
+    pass
 
 
 @app.get("/health")
@@ -56,6 +66,20 @@ def dashboard(request: Request):
             "stream_path": stream_path,
             "rtsp_url": RTSP_URL,
         },
+    )
+
+
+@app.get("/draw", response_class=HTMLResponse)
+def draw_page(request: Request):
+    host = (request.headers.get("host") or "").split(",")[0].strip()
+    hostname = host.split(":")[0] if host else "VM_IP"
+    stream_path = "live/stream"
+    webrtc_player_url = f"http://{hostname}:8889/{stream_path}"
+
+    return templates.TemplateResponse(
+        request,
+        "draw.html",
+        {"webrtc_player_url": webrtc_player_url},
     )
 
 
@@ -118,15 +142,68 @@ def webrtc_sessions():
         return {"ok": False, "error": str(e), "items": []}
 
 
-@app.get("/api/detector/config")
-def detector_get_config():
-    return detector.get_config()
+@app.get("/api/draws")
+def draws_list():
+    return {"active_id": (draws.active() or {}).get("id"), "items": draws.list()}
 
 
-@app.put("/api/detector/config")
-async def detector_set_config(request: Request):
+@app.get("/api/draws/active")
+def draws_active():
+    return {"item": draws.active()}
+
+
+@app.post("/api/draws")
+async def draws_create(request: Request):
     payload = await request.json()
-    return detector.set_config(payload)
+    name = str(payload.get("name", "")).strip() or "Untitled"
+    d = draws.create(name=name)
+    return {"item": d}
+
+
+@app.get("/api/draws/{draw_id}")
+def draws_get(draw_id: str):
+    d = draws.get(draw_id)
+    if d is None:
+        return Response(content=b"not found\n", status_code=404, media_type="text/plain")
+    return {"item": d}
+
+
+@app.put("/api/draws/{draw_id}")
+async def draws_update(draw_id: str, request: Request):
+    payload = await request.json()
+    try:
+        d = draws.update(draw_id, payload)
+    except KeyError:
+        return Response(content=b"not found\n", status_code=404, media_type="text/plain")
+
+    # If this draw is active, reflect changes into the detector immediately.
+    active = draws.active()
+    if active and active.get("id") == draw_id:
+        detector.apply_draw_record(active)
+    return {"item": d}
+
+
+@app.delete("/api/draws/{draw_id}")
+def draws_delete(draw_id: str):
+    try:
+        draws.delete(draw_id)
+    except KeyError:
+        return Response(content=b"not found\n", status_code=404, media_type="text/plain")
+    # refresh detector config from new active draw
+    active = draws.active()
+    if active is not None:
+        detector.apply_draw_record(active)
+    return {"ok": True}
+
+
+@app.post("/api/draws/{draw_id}/activate")
+def draws_activate(draw_id: str):
+    try:
+        d = draws.set_active(draw_id)
+    except KeyError:
+        return Response(content=b"not found\n", status_code=404, media_type="text/plain")
+    detector.apply_draw_record(d)
+    return {"item": d}
 
 
 @app.post("/api/detector/start")
@@ -143,7 +220,10 @@ def detector_stop():
 
 @app.get("/api/detector/status")
 def detector_status():
-    return detector.status()
+    st = detector.status()
+    active = draws.active()
+    st["active_draw"] = None if active is None else {"id": active.get("id"), "name": active.get("name")}
+    return st
 
 
 @app.get("/api/detector/results")

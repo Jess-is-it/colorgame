@@ -232,6 +232,22 @@ class ResultDetector:
         self._save_config(cfg)
         return self.get_config()
 
+    def apply_draw_record(self, draw: dict) -> None:
+        """
+        Apply a draw record from DrawStore as the active detector config.
+        This does not persist anything itself.
+        """
+        rr = draw.get("result_roi")
+        payload = {
+            "width": int(draw.get("width", 1920)),
+            "height": int(draw.get("height", 1080)),
+            "stable_frames": int(draw.get("stable_frames", 8)),
+            "min_confidence": float(draw.get("min_confidence", 0.35)),
+            "result_roi": rr,
+        }
+        # reuse validation and reset logic
+        self.set_config(payload)
+
     def status(self) -> dict:
         with self._lock:
             last = self._results[-1] if self._results else None

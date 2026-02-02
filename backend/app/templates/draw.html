@@ -1,0 +1,393 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="row between">
+    <div>
+      <h2>Draw</h2>
+      <div class="muted">Create and manage draw presets (named ROIs) for the result boxes.</div>
+    </div>
+    <div class="row">
+      <input id="newName" placeholder="New draw name" style="max-width: 260px;" />
+      <button class="btn primary" id="newBtn">New + Draw</button>
+    </div>
+  </div>
+
+  <div class="hr"></div>
+
+  <table class="table">
+    <thead>
+      <tr>
+        <th style="width: 180px;">Name</th>
+        <th>ROI</th>
+        <th style="width: 120px;">Active</th>
+        <th style="width: 260px;"></th>
+      </tr>
+    </thead>
+    <tbody id="drawRows"></tbody>
+  </table>
+</section>
+
+<div id="drawBackdrop" class="modal-backdrop"></div>
+<div id="drawModal" class="modal">
+  <div class="modal-panel">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="modalTitle">Draw Result Box</div>
+        <div class="muted">Drag to draw. Then move/resize. Covers all 3 result colors.</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn" id="modalClear">Clear</button>
+        <button class="btn" id="modalCancel">Cancel</button>
+        <button class="btn primary" id="modalSave">Save</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div class="row">
+        <span class="muted">Name:</span>
+        <input id="editName" style="max-width: 300px;" />
+        <span class="muted">ROI:</span>
+        <input id="roiAll" class="mono" style="max-width: 320px;" placeholder="x,y,w,h" />
+      </div>
+      <div class="preview" id="videoWrap" style="position: relative; margin-top: 10px;">
+        <iframe
+          id="playerFrame"
+          title="Live feed"
+          src="{{ webrtc_player_url }}"
+          allow="autoplay; fullscreen; picture-in-picture"
+          allowfullscreen
+          referrerpolicy="no-referrer"
+        ></iframe>
+        <div id="overlay" style="position:absolute; inset:0; pointer-events:auto;">
+          <div id="roiBox" class="roi-box b1" style="display:none;">
+            <div class="roi-handle nw" data-h="nw"></div>
+            <div class="roi-handle n" data-h="n"></div>
+            <div class="roi-handle ne" data-h="ne"></div>
+            <div class="roi-handle e" data-h="e"></div>
+            <div class="roi-handle se" data-h="se"></div>
+            <div class="roi-handle s" data-h="s"></div>
+            <div class="roi-handle sw" data-h="sw"></div>
+            <div class="roi-handle w" data-h="w"></div>
+          </div>
+          <div id="roiDrawRect" class="roi-draw"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let state = {
+    activeId: null,
+    draws: [],
+    editing: null,
+    prevRoi: null,
+    mode: 'idle', // idle|draw|move|resize
+    activeHandle: null,
+    startPt: null,
+    startRoi: null,
+  };
+
+  let cfgBase = { width: 1920, height: 1080 };
+
+  function fmtRoi(rr) {
+    if (!rr) return '(not set)';
+    return `${rr.x},${rr.y},${rr.w},${rr.h}`;
+  }
+
+  function parseBox(v) {
+    const parts = String(v || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (parts.length !== 4) return null;
+    const nums = parts.map(p => Number(p));
+    if (nums.some(n => !Number.isFinite(n))) return null;
+    return { x: Math.trunc(nums[0]), y: Math.trunc(nums[1]), w: Math.trunc(nums[2]), h: Math.trunc(nums[3]) };
+  }
+
+  async function load() {
+    const r = await fetch('/api/draws');
+    const j = await r.json();
+    state.activeId = j.active_id || null;
+    state.draws = Array.isArray(j.items) ? j.items : [];
+    renderTable();
+  }
+
+  function renderTable() {
+    const tbody = document.getElementById('drawRows');
+    tbody.innerHTML = '';
+
+    for (const d of state.draws) {
+      const tr = document.createElement('tr');
+      const active = (d.id === state.activeId);
+
+      const tdName = document.createElement('td');
+      tdName.textContent = d.name || d.id;
+
+      const tdRoi = document.createElement('td');
+      tdRoi.className = 'mono';
+      tdRoi.textContent = fmtRoi(d.result_roi);
+
+      const tdActive = document.createElement('td');
+      tdActive.textContent = active ? 'yes' : '';
+
+      const tdActions = document.createElement('td');
+      tdActions.className = 'right';
+      tdActions.innerHTML = `
+        <button class="btn" data-act="view" data-id="${d.id}">View/Draw</button>
+        <button class="btn" data-act="activate" data-id="${d.id}">Use</button>
+        <button class="btn danger" data-act="delete" data-id="${d.id}">Delete</button>
+      `;
+
+      tr.appendChild(tdName);
+      tr.appendChild(tdRoi);
+      tr.appendChild(tdActive);
+      tr.appendChild(tdActions);
+      tbody.appendChild(tr);
+    }
+  }
+
+  async function createAndEdit() {
+    const name = document.getElementById('newName').value || 'Untitled';
+    const r = await fetch('/api/draws', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    const j = await r.json();
+    await load();
+    if (j && j.item) openModal(j.item.id);
+  }
+
+  function openModal(drawId) {
+    const d = state.draws.find(x => x.id === drawId);
+    if (!d) return;
+    state.editing = d;
+    state.prevRoi = d.result_roi ? { ...d.result_roi } : null;
+    cfgBase = { width: Number(d.width || 1920), height: Number(d.height || 1080) };
+
+    document.getElementById('editName').value = d.name || '';
+    document.getElementById('roiAll').value = d.result_roi ? fmtRoi(d.result_roi) : '';
+    document.getElementById('modalTitle').textContent = `Draw: ${d.name || d.id}`;
+
+    document.getElementById('drawBackdrop').classList.add('open');
+    document.getElementById('drawModal').classList.add('open');
+
+    setPencilCursor(true);
+    renderBox(d.result_roi);
+  }
+
+  function closeModal(restorePrev) {
+    if (restorePrev && state.editing) {
+      state.editing.result_roi = state.prevRoi;
+    }
+    document.getElementById('drawBackdrop').classList.remove('open');
+    document.getElementById('drawModal').classList.remove('open');
+    setPencilCursor(false);
+    state.mode = 'idle';
+    state.activeHandle = null;
+    state.startPt = null;
+    state.startRoi = null;
+    document.getElementById('roiDrawRect').style.display = 'none';
+    state.editing = null;
+  }
+
+  function setPencilCursor(on) {
+    const overlay = document.getElementById('overlay');
+    overlay.style.cursor = on
+      ? 'url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 width=%2728%27 height=%2728%27 viewBox=%270 0 28 28%27><path fill=%27white%27 stroke=%27black%27 stroke-width=%271.5%27 d=%27M3 21l2.5 4L9 22.5 21.5 10 18 6.5 5.5 19z%27/><path fill=%27%23ffd166%27 stroke=%27black%27 stroke-width=%271.5%27 d=%27M18 6.5L21.5 10 24 7.5 20.5 4z%27/></svg>") 2 26, crosshair'
+      : 'default';
+  }
+
+  function clampRoi(r) {
+    const W = cfgBase.width;
+    const H = cfgBase.height;
+    const x = Math.max(0, Math.min(W - 1, r.x));
+    const y = Math.max(0, Math.min(H - 1, r.y));
+    const w = Math.max(1, Math.min(W - x, r.w));
+    const h = Math.max(1, Math.min(H - y, r.h));
+    return { x, y, w, h };
+  }
+
+  function toFrame(clientX, clientY) {
+    const overlay = document.getElementById('overlay');
+    const r = overlay.getBoundingClientRect();
+    const x = (clientX - r.left) * (cfgBase.width / r.width);
+    const y = (clientY - r.top) * (cfgBase.height / r.height);
+    return { x: Math.max(0, Math.min(cfgBase.width, x)), y: Math.max(0, Math.min(cfgBase.height, y)) };
+  }
+
+  function renderBox(rr) {
+    const roiBox = document.getElementById('roiBox');
+    if (!rr) {
+      roiBox.style.display = 'none';
+      return;
+    }
+    const overlay = document.getElementById('overlay');
+    const rect = overlay.getBoundingClientRect();
+    const scaleX = rect.width / cfgBase.width;
+    const scaleY = rect.height / cfgBase.height;
+    roiBox.style.left = (rr.x * scaleX) + 'px';
+    roiBox.style.top = (rr.y * scaleY) + 'px';
+    roiBox.style.width = (rr.w * scaleX) + 'px';
+    roiBox.style.height = (rr.h * scaleY) + 'px';
+    roiBox.style.display = 'block';
+  }
+
+  function handleFromTarget(t) {
+    const el = t && t.closest ? t.closest('.roi-handle') : null;
+    return el ? el.getAttribute('data-h') : null;
+  }
+
+  // modal actions
+  document.getElementById('modalCancel').addEventListener('click', () => closeModal(true));
+  document.getElementById('drawBackdrop').addEventListener('click', () => closeModal(true));
+  document.getElementById('modalClear').addEventListener('click', () => {
+    if (!state.editing) return;
+    state.editing.result_roi = null;
+    document.getElementById('roiAll').value = '';
+    renderBox(null);
+  });
+  document.getElementById('modalSave').addEventListener('click', async () => {
+    if (!state.editing) return;
+    const name = document.getElementById('editName').value || state.editing.name || 'Untitled';
+    const rr = parseBox(document.getElementById('roiAll').value);
+    const payload = { name, result_roi: rr };
+    await fetch(`/api/draws/${state.editing.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    await load();
+    closeModal(false);
+  });
+
+  // table actions
+  document.getElementById('drawRows').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const act = btn.getAttribute('data-act');
+    const id = btn.getAttribute('data-id');
+    if (!id) return;
+
+    if (act === 'view') {
+      openModal(id);
+      return;
+    }
+    if (act === 'activate') {
+      await fetch(`/api/draws/${id}/activate`, { method: 'POST' });
+      await load();
+      return;
+    }
+    if (act === 'delete') {
+      if (!confirm('Delete this draw?')) return;
+      await fetch(`/api/draws/${id}`, { method: 'DELETE' });
+      await load();
+      return;
+    }
+  });
+
+  document.getElementById('newBtn').addEventListener('click', () => createAndEdit());
+
+  // draw/move/resize gestures
+  (function setupOverlay() {
+    const overlay = document.getElementById('overlay');
+    const drawRect = document.getElementById('roiDrawRect');
+    const roiBox = document.getElementById('roiBox');
+
+    overlay.addEventListener('mousedown', (e) => {
+      if (!state.editing) return;
+      // Keep mapping in sync with the selected draw resolution.
+      cfgBase = { width: Number(state.editing.width || 1920), height: Number(state.editing.height || 1080) };
+      const h = handleFromTarget(e.target);
+      const pt = toFrame(e.clientX, e.clientY);
+      const rr = state.editing.result_roi;
+
+      if (h && rr) {
+        state.mode = 'resize';
+        state.activeHandle = h;
+        state.startPt = pt;
+        state.startRoi = { ...rr };
+        e.preventDefault();
+        return;
+      }
+
+      if (rr && roiBox.style.display !== 'none') {
+        const boxRect = roiBox.getBoundingClientRect();
+        if (e.clientX >= boxRect.left && e.clientX <= boxRect.right && e.clientY >= boxRect.top && e.clientY <= boxRect.bottom) {
+          state.mode = 'move';
+          state.startPt = pt;
+          state.startRoi = { ...rr };
+          e.preventDefault();
+          return;
+        }
+      }
+
+      state.mode = 'draw';
+      state.startPt = pt;
+      drawRect.style.display = 'block';
+      e.preventDefault();
+    });
+
+    window.addEventListener('mousemove', (e) => {
+      if (!state.editing) return;
+      if (!state.startPt) return;
+      const pt = toFrame(e.clientX, e.clientY);
+
+      if (state.mode === 'draw') {
+        const a = state.startPt;
+        const overlayRect = overlay.getBoundingClientRect();
+        const scaleX = overlayRect.width / cfgBase.width;
+        const scaleY = overlayRect.height / cfgBase.height;
+        const left = Math.min(a.x, pt.x) * scaleX;
+        const top = Math.min(a.y, pt.y) * scaleY;
+        const w = Math.abs(pt.x - a.x) * scaleX;
+        const h = Math.abs(pt.y - a.y) * scaleY;
+        drawRect.style.left = left + 'px';
+        drawRect.style.top = top + 'px';
+        drawRect.style.width = w + 'px';
+        drawRect.style.height = h + 'px';
+      }
+
+      if (state.mode === 'move' && state.startRoi) {
+        const dx = pt.x - state.startPt.x;
+        const dy = pt.y - state.startPt.y;
+        const rr = clampRoi({ x: Math.round(state.startRoi.x + dx), y: Math.round(state.startRoi.y + dy), w: state.startRoi.w, h: state.startRoi.h });
+        state.editing.result_roi = rr;
+        document.getElementById('roiAll').value = fmtRoi(rr);
+        renderBox(rr);
+      }
+
+      if (state.mode === 'resize' && state.startRoi) {
+        let x = state.startRoi.x, y = state.startRoi.y, w = state.startRoi.w, h = state.startRoi.h;
+        const dx = pt.x - state.startPt.x;
+        const dy = pt.y - state.startPt.y;
+        const minSize = 10;
+        const ah = state.activeHandle;
+        if (ah.includes('e')) w = Math.max(minSize, Math.round(state.startRoi.w + dx));
+        if (ah.includes('s')) h = Math.max(minSize, Math.round(state.startRoi.h + dy));
+        if (ah.includes('w')) { x = Math.round(state.startRoi.x + dx); w = Math.max(minSize, Math.round(state.startRoi.w - dx)); }
+        if (ah.includes('n')) { y = Math.round(state.startRoi.y + dy); h = Math.max(minSize, Math.round(state.startRoi.h - dy)); }
+        const rr = clampRoi({ x, y, w, h });
+        state.editing.result_roi = rr;
+        document.getElementById('roiAll').value = fmtRoi(rr);
+        renderBox(rr);
+      }
+    });
+
+    window.addEventListener('mouseup', (e) => {
+      if (!state.editing) return;
+      if (!state.startPt) return;
+      const pt = toFrame(e.clientX, e.clientY);
+
+      if (state.mode === 'draw') {
+        drawRect.style.display = 'none';
+        const x0 = Math.round(Math.min(state.startPt.x, pt.x));
+        const y0 = Math.round(Math.min(state.startPt.y, pt.y));
+        const w = Math.max(10, Math.round(Math.abs(pt.x - state.startPt.x)));
+        const h = Math.max(10, Math.round(Math.abs(pt.y - state.startPt.y)));
+        const rr = clampRoi({ x: x0, y: y0, w, h });
+        state.editing.result_roi = rr;
+        document.getElementById('roiAll').value = fmtRoi(rr);
+        renderBox(rr);
+      }
+
+      state.mode = 'idle';
+      state.activeHandle = null;
+      state.startPt = null;
+      state.startRoi = null;
+    });
+  })();
+
+  load().catch(() => {});
+</script>
+{% endblock %}

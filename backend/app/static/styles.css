@@ -56,6 +56,15 @@ a:hover { text-decoration: underline; }
   .grid { grid-template-columns: 1fr; }
 }
 
+.split {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 980px) {
+  .split { grid-template-columns: 1fr 360px; align-items: start; }
+}
+
 .card {
   background: linear-gradient(180deg, rgba(255,255,255,0.06), transparent 45%),
               linear-gradient(180deg, var(--panel), var(--panel2));

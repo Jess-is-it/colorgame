@@ -1,183 +1,120 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card">
-  <h2>Dashboard</h2>
-
-  <div class="row">
-    <span class="muted">Stream status:</span>
-    <span id="streamStatus" class="mono">checking…</span>
-    <span id="streamTracks" class="muted"></span>
-    <span id="streamSource" class="muted"></span>
+  <div class="row between">
+    <div>
+      <h2>Live</h2>
+      <div class="muted">OBS stream + latest detected result.</div>
+    </div>
+    <div class="row">
+      <span class="muted">Stream:</span>
+      <span id="streamStatus" class="mono">checking…</span>
+      <span id="streamTracks" class="muted"></span>
+    </div>
   </div>
 
-  <details style="margin-top: 10px;">
-    <summary>Connection Debug</summary>
-    <div style="margin-top: 8px;">
-      <div class="row">
-        <span class="muted">WebRTC sessions:</span>
-        <span id="webrtcSessions" class="mono">checking…</span>
+  <div class="split" style="margin-top: 12px;">
+    <div class="card" style="padding: 12px;">
+      <div class="preview">
+        <iframe
+          id="playerFrame"
+          title="Live feed"
+          src="{{ webrtc_player_url }}"
+          allow="autoplay; fullscreen; picture-in-picture"
+          allowfullscreen
+          referrerpolicy="no-referrer"
+        ></iframe>
       </div>
-      <div class="row">
-        <span class="muted">Latest ICE:</span>
-        <span id="webrtcIce" class="mono"></span>
+      <div class="row" style="margin-top: 10px;">
+        <a class="muted" href="{{ webrtc_player_url }}" target="_blank" rel="noopener">Open player in new tab</a>
       </div>
+
+      <details style="margin-top: 10px;">
+        <summary>OBS Settings (Recommended: WHIP)</summary>
+        <div style="margin-top: 8px;">
+          <div class="row">
+            <span class="muted">Service:</span>
+            <span class="mono">WHIP</span>
+          </div>
+          <div class="row">
+            <span class="muted">Server:</span>
+            <span class="mono">{{ whip_url }}</span>
+          </div>
+          <div class="row">
+            <span class="muted">Stream key:</span>
+            <span class="mono">(empty)</span>
+          </div>
+        </div>
+      </details>
     </div>
-  </details>
 
-  <details style="margin-top: 10px;" open>
-    <summary>Result Detection (OpenCV)</summary>
-    <div style="margin-top: 8px;">
+    <aside class="card" style="padding: 12px;">
+      <h2 style="margin-bottom: 8px;">Latest Win</h2>
+
       <div class="row">
-        <span class="muted">RTSP (used for detection):</span>
-        <span class="mono">{{ rtsp_url }}</span>
+        <span class="muted">Active draw:</span>
+        <span id="activeDraw" class="mono">…</span>
       </div>
 
       <div class="row">
-        <button class="btn primary" id="detStart">Start Detection</button>
+        <span class="muted">Colors:</span>
+        <span id="latestColors" class="mono"></span>
+      </div>
+
+      <div class="row">
+        <span class="muted">Time:</span>
+        <span id="latestTime" class="mono"></span>
+      </div>
+
+      <div class="row">
+        <span class="muted">Detector:</span>
+        <span id="detStatus" class="mono">…</span>
+      </div>
+
+      <div class="row">
+        <button class="btn primary" id="detStart">Start</button>
         <button class="btn" id="detStop">Stop</button>
-        <span class="muted">Status:</span>
-        <span id="detStatus" class="mono">checking…</span>
       </div>
+
+      <div class="hr"></div>
+
+      <details>
+        <summary>Connection Debug</summary>
+        <div style="margin-top: 8px;">
+          <div class="row">
+            <span class="muted">WebRTC sessions:</span>
+            <span id="webrtcSessions" class="mono">…</span>
+          </div>
+          <div class="row">
+            <span class="muted">Latest ICE:</span>
+            <span id="webrtcIce" class="mono"></span>
+          </div>
+        </div>
+      </details>
 
       <div class="row" style="margin-top: 10px;">
-        <button class="btn" id="drawRoi">Draw Box On Video</button>
-        <button class="btn" id="clearRoi">Clear</button>
-        <span class="muted">Draw one rectangle covering all 3 result colors.</span>
+        <a class="muted" href="/draw">Go to Draw page</a>
       </div>
-      <div class="row">
-        <span class="muted">ROI (x,y,w,h):</span>
-        <input id="roiAll" class="mono" placeholder="x,y,w,h" style="max-width: 320px;" />
-        <button class="btn" id="detSave">Save ROI</button>
-      </div>
-
-      <div class="row">
-        <span class="muted">Latest result:</span>
-        <span id="detLast" class="mono"></span>
-      </div>
-
-      <div class="row">
-        <span class="muted">History:</span>
-      </div>
-      <div class="status">
-        <div id="detHistory" class="mono"></div>
-      </div>
-    </div>
-  </details>
-
-  <details style="margin-top: 10px;" open>
-    <summary>OBS Settings (Recommended: WHIP / WebRTC)</summary>
-    <div style="margin-top: 8px;">
-      <div class="row">
-        <span class="muted">Service:</span>
-        <span class="mono">WHIP</span>
-      </div>
-      <div class="row">
-        <span class="muted">Server:</span>
-        <span class="mono">{{ whip_url }}</span>
-      </div>
-      <div class="row">
-        <span class="muted">Stream key:</span>
-        <span class="mono">(empty)</span>
-      </div>
-      <div class="row">
-        <span class="muted">Tip:</span>
-        <span class="muted">WHIP avoids the RTMP→WebRTC audio mismatch and is the lowest-latency path.</span>
-      </div>
-    </div>
-  </details>
-
-  <details style="margin-top: 10px;">
-    <summary>OBS Settings (Alternate: RTMP)</summary>
-    <div style="margin-top: 8px;">
-      <div class="row">
-        <span class="muted">Service:</span>
-        <span class="mono">Custom…</span>
-      </div>
-      <div class="row">
-        <span class="muted">Server:</span>
-        <span class="mono">{{ rtmp_server }}</span>
-      </div>
-      <div class="row">
-        <span class="muted">Stream key:</span>
-        <span class="mono">{{ rtmp_stream_key }}</span>
-      </div>
-      <div class="row">
-        <span class="muted">Note:</span>
-        <span class="muted">If the player says “peer connection closed”, it’s often because your H.264 has B-frames enabled. Set B-frames = 0 and Profile = Baseline/Constrained Baseline.</span>
-      </div>
-    </div>
-  </details>
-
-  <div class="preview" style="margin-top: 12px;">
-    <div id="videoWrap" style="position: relative;">
-      <iframe
-        id="playerFrame"
-        title="Live feed"
-        src="{{ webrtc_player_url }}"
-        allow="autoplay; fullscreen; picture-in-picture"
-        allowfullscreen
-        referrerpolicy="no-referrer"
-      ></iframe>
-      <div id="overlay" style="position:absolute; inset:0; pointer-events:none;">
-        <div id="roiBox" class="roi-box b1" style="display:none;">
-          <div class="roi-handle nw" data-h="nw"></div>
-          <div class="roi-handle n" data-h="n"></div>
-          <div class="roi-handle ne" data-h="ne"></div>
-          <div class="roi-handle e" data-h="e"></div>
-          <div class="roi-handle se" data-h="se"></div>
-          <div class="roi-handle s" data-h="s"></div>
-          <div class="roi-handle sw" data-h="sw"></div>
-          <div class="roi-handle w" data-h="w"></div>
-        </div>
-        <div id="roiDrawRect" class="roi-draw"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="row" style="margin-top: 10px;">
-    <a class="muted" href="{{ webrtc_player_url }}" target="_blank" rel="noopener">Open player in new tab</a>
+    </aside>
   </div>
 </section>
 
-<div id="drawBackdrop" class="modal-backdrop"></div>
-<div id="drawModal" class="modal">
-  <div class="modal-panel">
-    <div class="modal-header">
-      <div>
-        <div class="modal-title">Draw Result Box</div>
-        <div class="muted">Drag to draw. Then move/resize the rectangle. Covers all 3 result colors.</div>
-      </div>
-      <div class="modal-actions">
-        <button class="btn" id="modalClear">Clear</button>
-        <button class="btn" id="modalCancel">Cancel</button>
-        <button class="btn primary" id="modalSave">Save</button>
-      </div>
-    </div>
-    <div class="modal-body">
-      <div class="preview" id="modalVideoHost" style="position: relative;"></div>
-    </div>
-  </div>
-</div>
-
 <script>
-  async function pollStatus() {
+  async function pollStream() {
     try {
       const r = await fetch('/api/stream/status');
       const j = await r.json();
       const pub = !!j.publishing;
-      document.getElementById('streamStatus').textContent = pub ? 'connected (publishing)' : 'disconnected';
+      document.getElementById('streamStatus').textContent = pub ? 'connected' : 'disconnected';
       const tracks = Array.isArray(j.tracks) ? j.tracks.join(' · ') : '';
       document.getElementById('streamTracks').textContent = tracks ? `(${tracks})` : '';
-      const sourceType = j && j.source && j.source.type ? String(j.source.type) : '';
-      document.getElementById('streamSource').textContent = sourceType ? `source: ${sourceType}` : '';
     } catch (_) {
       document.getElementById('streamStatus').textContent = 'unknown';
       document.getElementById('streamTracks').textContent = '';
-      document.getElementById('streamSource').textContent = '';
     }
-    setTimeout(pollStatus, 1000);
+    setTimeout(pollStream, 1000);
   }
-  pollStatus();
+  pollStream();
 
   async function pollWebrtc() {
     try {
@@ -185,7 +122,6 @@
       const j = await r.json();
       const items = Array.isArray(j.items) ? j.items : [];
       document.getElementById('webrtcSessions').textContent = String(items.length);
-
       if (items.length > 0) {
         const last = items[items.length - 1];
         const lc = last.localCandidate ? String(last.localCandidate) : '';
@@ -202,67 +138,28 @@
   }
   pollWebrtc();
 
-  function parseBox(v) {
-    const parts = String(v || '').split(',').map(s => s.trim()).filter(Boolean);
-    if (parts.length !== 4) return null;
-    const nums = parts.map(p => Number(p));
-    if (nums.some(n => !Number.isFinite(n))) return null;
-    return { x: Math.trunc(nums[0]), y: Math.trunc(nums[1]), w: Math.trunc(nums[2]), h: Math.trunc(nums[3]) };
-  }
-
-  async function loadDetConfig() {
-    const r = await fetch('/api/detector/config');
-    const j = await r.json();
-    const rr = j.result_roi;
-    if (rr) {
-      document.getElementById('roiAll').value = `${rr.x},${rr.y},${rr.w},${rr.h}`;
-    }
-    window.__detectorCfg = j;
-    renderRois();
-  }
-
-  function renderRois() {
-    const cfg = window.__detectorCfg || {};
-    const rr = cfg.result_roi;
-    const roiEl = document.getElementById('roiBox');
-    const wrap = document.getElementById('videoWrap');
-    const overlay = document.getElementById('overlay');
-    if (!rr || !roiEl || !wrap || !overlay || !cfg.width || !cfg.height) {
-      if (roiEl) roiEl.style.display = 'none';
-      return;
-    }
-
-    const rect = overlay.getBoundingClientRect();
-    const scaleX = rect.width / cfg.width;
-    const scaleY = rect.height / cfg.height;
-    roiEl.style.left = (rr.x * scaleX) + 'px';
-    roiEl.style.top = (rr.y * scaleY) + 'px';
-    roiEl.style.width = (rr.w * scaleX) + 'px';
-    roiEl.style.height = (rr.h * scaleY) + 'px';
-    roiEl.style.display = 'block';
-  }
-
-  async function pollDet() {
+  async function pollDetector() {
     try {
       const r = await fetch('/api/detector/status');
       const j = await r.json();
-      const status = j.running ? (j.connected ? 'running (connected)' : 'running (disconnected)') : 'stopped';
+      const status = j.running ? (j.connected ? 'running' : 'running (disconnected)') : 'stopped';
       document.getElementById('detStatus').textContent = status;
-      document.getElementById('detLast').textContent = j.last_result ? JSON.stringify(j.last_result.colors) : '';
+
+      const ad = j.active_draw ? `${j.active_draw.name}` : '(none)';
+      document.getElementById('activeDraw').textContent = ad;
+
+      const lr = j.last_result;
+      document.getElementById('latestColors').textContent = lr ? lr.colors.join(', ') : '';
+      document.getElementById('latestTime').textContent = lr ? lr.timestamp : '';
     } catch (_) {
       document.getElementById('detStatus').textContent = 'unknown';
+      document.getElementById('activeDraw').textContent = 'unknown';
+      document.getElementById('latestColors').textContent = '';
+      document.getElementById('latestTime').textContent = '';
     }
-    try {
-      const r = await fetch('/api/detector/results');
-      const j = await r.json();
-      const items = Array.isArray(j.items) ? j.items : [];
-      const lines = items.slice(-10).reverse().map(it => `${it.timestamp}  ${it.colors.join(', ')}  (conf=${(it.confidence||0).toFixed(2)})`);
-      document.getElementById('detHistory').textContent = lines.join('\n');
-    } catch (_) {
-      document.getElementById('detHistory').textContent = '';
-    }
-    setTimeout(pollDet, 1000);
+    setTimeout(pollDetector, 1000);
   }
+  pollDetector();
 
   document.getElementById('detStart').addEventListener('click', async () => {
     await fetch('/api/detector/start', { method: 'POST' });
@@ -270,305 +167,6 @@
   document.getElementById('detStop').addEventListener('click', async () => {
     await fetch('/api/detector/stop', { method: 'POST' });
   });
-  document.getElementById('detSave').addEventListener('click', async () => {
-    const rr = parseBox(document.getElementById('roiAll').value);
-    if (!rr) {
-      alert('Invalid ROI. Use: x,y,w,h');
-      return;
-    }
-    const payload = { result_roi: rr };
-    const r = await fetch('/api/detector/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    window.__detectorCfg = await r.json();
-    renderRois();
-  });
-
-  function setDrawMode(on) {
-    const overlay = document.getElementById('overlay');
-    const wrap = document.getElementById('videoWrap');
-    if (!overlay || !wrap) return;
-    overlay.style.pointerEvents = on ? 'auto' : 'none';
-    // Pencil-ish cursor (fallback to crosshair).
-    overlay.style.cursor = on
-      ? 'url("data:image/svg+xml;utf8,<svg xmlns=%27http://www.w3.org/2000/svg%27 width=%2728%27 height=%2728%27 viewBox=%270 0 28 28%27><path fill=%27white%27 stroke=%27black%27 stroke-width=%271.5%27 d=%27M3 21l2.5 4L9 22.5 21.5 10 18 6.5 5.5 19z%27/><path fill=%27%23ffd166%27 stroke=%27black%27 stroke-width=%271.5%27 d=%27M18 6.5L21.5 10 24 7.5 20.5 4z%27/></svg>") 2 26, crosshair'
-      : 'default';
-  }
-
-  document.getElementById('drawRoi').addEventListener('click', () => {
-    openDrawModal();
-  });
-  document.getElementById('clearRoi').addEventListener('click', () => {
-    document.getElementById('roiAll').value = '';
-    const roiEl = document.getElementById('roiBox');
-    if (roiEl) roiEl.style.display = 'none';
-  });
-
-  // Modal ROI draw + move/resize.
-  (function setupRoiModal() {
-    const modal = document.getElementById('drawModal');
-    const backdrop = document.getElementById('drawBackdrop');
-    const host = document.getElementById('modalVideoHost');
-    const overlay = document.getElementById('overlay');
-    const roiBox = document.getElementById('roiBox');
-    const drawRect = document.getElementById('roiDrawRect');
-    const videoWrap = document.getElementById('videoWrap');
-
-    let origParent = null;
-    let origNext = null;
-    let prevRoi = null;
-
-    let mode = 'idle'; // idle|draw|move|resize
-    let activeHandle = null;
-    let startPt = null;
-    let startRoi = null;
-
-    function getCfg() { return window.__detectorCfg || {}; }
-
-    function currentRoi() {
-      const cfg = getCfg();
-      if (cfg && cfg.result_roi) return cfg.result_roi;
-      const rr = parseBox(document.getElementById('roiAll').value);
-      return rr;
-    }
-
-    function clampRoi(r) {
-      const cfg = getCfg();
-      const W = cfg.width || 1920;
-      const H = cfg.height || 1080;
-      const x = Math.max(0, Math.min(W - 1, r.x));
-      const y = Math.max(0, Math.min(H - 1, r.y));
-      const w = Math.max(1, Math.min(W - x, r.w));
-      const h = Math.max(1, Math.min(H - y, r.h));
-      return { x, y, w, h };
-    }
-
-    function toFrame(clientX, clientY) {
-      const cfg = getCfg();
-      const r = overlay.getBoundingClientRect();
-      const x = (clientX - r.left) * ((cfg.width || 1920) / r.width);
-      const y = (clientY - r.top) * ((cfg.height || 1080) / r.height);
-      const W = cfg.width || 1920;
-      const H = cfg.height || 1080;
-      return { x: Math.max(0, Math.min(W, x)), y: Math.max(0, Math.min(H, y)) };
-    }
-
-    function renderBox(r) {
-      const cfg = getCfg();
-      const rect = overlay.getBoundingClientRect();
-      const scaleX = rect.width / cfg.width;
-      const scaleY = rect.height / cfg.height;
-      roiBox.style.left = (r.x * scaleX) + 'px';
-      roiBox.style.top = (r.y * scaleY) + 'px';
-      roiBox.style.width = (r.w * scaleX) + 'px';
-      roiBox.style.height = (r.h * scaleY) + 'px';
-      roiBox.style.display = 'block';
-    }
-
-    function hideBox() {
-      roiBox.style.display = 'none';
-    }
-
-    function open() {
-      const cfg = getCfg();
-      if (!cfg.width || !cfg.height) return;
-
-      prevRoi = currentRoi() ? { ...currentRoi() } : null;
-
-      // Move the existing live video into the modal so user draws on the real feed.
-      origParent = videoWrap.parentNode;
-      origNext = videoWrap.nextSibling;
-      host.appendChild(videoWrap);
-
-      backdrop.classList.add('open');
-      modal.classList.add('open');
-
-      setDrawMode(true);
-      // show existing ROI if present
-      if (prevRoi) renderBox(prevRoi);
-    }
-
-    function close(restorePrev) {
-      // restore live video back to the page
-      if (origParent) {
-        if (origNext) origParent.insertBefore(videoWrap, origNext);
-        else origParent.appendChild(videoWrap);
-      }
-      backdrop.classList.remove('open');
-      modal.classList.remove('open');
-      setDrawMode(false);
-      mode = 'idle';
-      activeHandle = null;
-      startPt = null;
-      startRoi = null;
-      drawRect.style.display = 'none';
-
-      if (restorePrev) {
-        const cfg = getCfg();
-        cfg.result_roi = prevRoi;
-        window.__detectorCfg = cfg;
-        document.getElementById('roiAll').value = prevRoi ? `${prevRoi.x},${prevRoi.y},${prevRoi.w},${prevRoi.h}` : '';
-      }
-      renderRois();
-    }
-
-    function saveAndClose() {
-      const rr = currentRoi();
-      if (!rr) {
-        alert('Draw a box first (or Clear then Cancel).');
-        return;
-      }
-      const payload = { result_roi: rr };
-      fetch('/api/detector/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-        .then(r => r.json())
-        .then(j => {
-          window.__detectorCfg = j;
-          document.getElementById('roiAll').value = `${j.result_roi.x},${j.result_roi.y},${j.result_roi.w},${j.result_roi.h}`;
-          close(false);
-        })
-        .catch(() => close(false));
-    }
-
-    function clearRoi() {
-      const cfg = getCfg();
-      cfg.result_roi = null;
-      window.__detectorCfg = cfg;
-      document.getElementById('roiAll').value = '';
-      hideBox();
-    }
-
-    // Expose open for the button handler.
-    window.openDrawModal = open;
-
-    document.getElementById('modalCancel').addEventListener('click', () => close(true));
-    backdrop.addEventListener('click', () => close(true));
-    document.getElementById('modalClear').addEventListener('click', () => clearRoi());
-    document.getElementById('modalSave').addEventListener('click', () => saveAndClose());
-
-    function setTempDrawRect(a, b) {
-      const cfg = getCfg();
-      const r = overlay.getBoundingClientRect();
-      const scaleX = r.width / cfg.width;
-      const scaleY = r.height / cfg.height;
-      const left = Math.min(a.x, b.x) * scaleX;
-      const top = Math.min(a.y, b.y) * scaleY;
-      const w = Math.abs(b.x - a.x) * scaleX;
-      const h = Math.abs(b.y - a.y) * scaleY;
-      drawRect.style.left = left + 'px';
-      drawRect.style.top = top + 'px';
-      drawRect.style.width = w + 'px';
-      drawRect.style.height = h + 'px';
-      drawRect.style.display = 'block';
-    }
-
-    function handleFromTarget(t) {
-      const el = t && t.closest ? t.closest('.roi-handle') : null;
-      return el ? el.getAttribute('data-h') : null;
-    }
-
-    overlay.addEventListener('mousedown', (e) => {
-      const cfg = getCfg();
-      if (!modal.classList.contains('open')) return;
-      if (!cfg.width || !cfg.height) return;
-
-      const h = handleFromTarget(e.target);
-      const rr = currentRoi();
-      const pt = toFrame(e.clientX, e.clientY);
-
-      if (h && rr) {
-        mode = 'resize';
-        activeHandle = h;
-        startPt = pt;
-        startRoi = { ...rr };
-        e.preventDefault();
-        return;
-      }
-
-      // move if click inside existing box (but not on handle)
-      if (rr && roiBox.style.display !== 'none') {
-        const boxRect = roiBox.getBoundingClientRect();
-        if (e.clientX >= boxRect.left && e.clientX <= boxRect.right && e.clientY >= boxRect.top && e.clientY <= boxRect.bottom) {
-          mode = 'move';
-          startPt = pt;
-          startRoi = { ...rr };
-          e.preventDefault();
-          return;
-        }
-      }
-
-      // start drawing a new ROI
-      mode = 'draw';
-      startPt = pt;
-      drawRect.style.display = 'block';
-      setTempDrawRect(pt, pt);
-      e.preventDefault();
-    });
-
-    window.addEventListener('mousemove', (e) => {
-      if (!modal.classList.contains('open')) return;
-      if (!startPt) return;
-      const cfg = getCfg();
-      if (!cfg.width || !cfg.height) return;
-      const pt = toFrame(e.clientX, e.clientY);
-
-      if (mode === 'draw') {
-        setTempDrawRect(startPt, pt);
-      } else if (mode === 'move' && startRoi) {
-        const dx = pt.x - startPt.x;
-        const dy = pt.y - startPt.y;
-        const rr = clampRoi({ x: Math.round(startRoi.x + dx), y: Math.round(startRoi.y + dy), w: startRoi.w, h: startRoi.h });
-        const cfg2 = getCfg();
-        cfg2.result_roi = rr;
-        window.__detectorCfg = cfg2;
-        renderBox(rr);
-      } else if (mode === 'resize' && startRoi) {
-        let x = startRoi.x, y = startRoi.y, w = startRoi.w, h = startRoi.h;
-        const dx = pt.x - startPt.x;
-        const dy = pt.y - startPt.y;
-        const minSize = 10;
-
-        const ah = activeHandle;
-        if (ah.includes('e')) w = Math.max(minSize, Math.round(startRoi.w + dx));
-        if (ah.includes('s')) h = Math.max(minSize, Math.round(startRoi.h + dy));
-        if (ah.includes('w')) { x = Math.round(startRoi.x + dx); w = Math.max(minSize, Math.round(startRoi.w - dx)); }
-        if (ah.includes('n')) { y = Math.round(startRoi.y + dy); h = Math.max(minSize, Math.round(startRoi.h - dy)); }
-
-        const rr = clampRoi({ x, y, w, h });
-        const cfg2 = getCfg();
-        cfg2.result_roi = rr;
-        window.__detectorCfg = cfg2;
-        renderBox(rr);
-      }
-    });
-
-    window.addEventListener('mouseup', (e) => {
-      if (!modal.classList.contains('open')) return;
-      if (!startPt) return;
-      const cfg = getCfg();
-      const pt = toFrame(e.clientX, e.clientY);
-
-      if (mode === 'draw') {
-        drawRect.style.display = 'none';
-        const x0 = Math.round(Math.min(startPt.x, pt.x));
-        const y0 = Math.round(Math.min(startPt.y, pt.y));
-        const w = Math.max(10, Math.round(Math.abs(pt.x - startPt.x)));
-        const h = Math.max(10, Math.round(Math.abs(pt.y - startPt.y)));
-        const rr = clampRoi({ x: x0, y: y0, w, h });
-        cfg.result_roi = rr;
-        window.__detectorCfg = cfg;
-        document.getElementById('roiAll').value = `${rr.x},${rr.y},${rr.w},${rr.h}`;
-        renderBox(rr);
-      } else if (mode === 'move' || mode === 'resize') {
-        const rr = currentRoi();
-        if (rr) document.getElementById('roiAll').value = `${rr.x},${rr.y},${rr.w},${rr.h}`;
-      }
-
-      mode = 'idle';
-      activeHandle = null;
-      startPt = null;
-      startRoi = null;
-    });
-  })();
-
-  loadDetConfig().catch(() => {});
-  pollDet();
 </script>
 {% endblock %}
+

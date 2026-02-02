@@ -38,6 +38,12 @@ The dashboard embeds the MediaMTX WebRTC player (low latency):
 
 - `http://<VM_IP>:8889/live/stream`
 
+## Draw presets
+
+Go to `http://<VM_IP>:8000/draw` to create named draw presets (ROIs) and select which one is active.
+
+The Dashboard shows the latest detected result for the active draw.
+
 ## Ports
 
 - `8000/tcp` Dashboard (FastAPI)
