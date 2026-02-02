@@ -31,8 +31,6 @@ draws = DrawStore(path=DRAWS_PATH)
 samples = SampleStore(root=SAMPLES_ROOT)
 detector = ResultDetector(rtsp_url=RTSP_URL, fps=DETECTOR_FPS, config_path="/tmp/detector_config.json")
 
-ALLOWED_COLORS = {"yellow", "white", "pink", "blue", "red", "green"}
-
 def _sync_detector_with_active_draw() -> None:
     active = draws.active()
     if active is None:
@@ -229,38 +227,6 @@ def samples_get_file(draw_id: str, sample_id: str):
     except Exception as e:
         return Response(content=f"error: {e}\n".encode("utf-8"), status_code=500, media_type="text/plain")
 
-
-@app.put("/api/draws/{draw_id}/samples/{sample_id}")
-async def samples_set_labels(draw_id: str, sample_id: str, request: Request):
-    payload = await request.json()
-    labels = payload.get("labels")
-    if labels is not None:
-        if not isinstance(labels, list) or len(labels) != 3:
-            return Response(content=b"labels must be a list of 3 items\n", status_code=400, media_type="text/plain")
-        out = []
-        for v in labels:
-            if v is None:
-                out.append(None)
-                continue
-            s = str(v).strip().lower()
-            if not s:
-                out.append(None)
-                continue
-            if s not in ALLOWED_COLORS:
-                return Response(
-                    content=f"invalid label: {s}\n".encode("utf-8"),
-                    status_code=400,
-                    media_type="text/plain",
-                )
-            out.append(s)
-        labels = out
-    try:
-        it = samples.update_labels(draw_id, sample_id, labels)
-        return {"item": it}
-    except KeyError:
-        return Response(content=b"not found\n", status_code=404, media_type="text/plain")
-
-
 @app.delete("/api/draws/{draw_id}/samples/{sample_id}")
 def samples_delete(draw_id: str, sample_id: str):
     try:
@@ -273,12 +239,13 @@ def samples_delete(draw_id: str, sample_id: str):
 @app.post("/api/draws/{draw_id}/train")
 def train_draw(draw_id: str):
     """
-    Train a very small per-draw color model from labeled sample images.
-    """
-    import math
+    Train a small per-draw *layout* model from unlabeled sample images.
 
+    The model learns the relative positions of the 3 color boxes inside result_roi,
+    based on contour-detected squares across multiple screenshots. This improves
+    robustness without "learning colors".
+    """
     import cv2
-    import numpy as np
     from app.detector import DetectorConfig, ROI
 
     d = draws.get(draw_id)
@@ -288,22 +255,16 @@ def train_draw(draw_id: str):
     if rr is None:
         return Response(content=b"draw has no result_roi\n", status_code=400, media_type="text/plain")
 
-    # collect labeled patches
+    # collect screenshots
     items = samples.list(draw_id)
     if not items:
         return Response(content=b"no samples\n", status_code=400, media_type="text/plain")
 
-    buckets = {}  # color -> list[(h,s,v)]
+    # per-box list of relative (x,y,w,h) coordinates within ROI
+    rels: list[list[tuple[float, float, float, float]]] = [[], [], []]
     used = 0
     skipped = 0
     for it in items:
-        labels = it.get("labels")
-        if not labels or not isinstance(labels, list) or len(labels) != 3:
-            skipped += 1
-            continue
-        if any((v is None) or (str(v).strip() == "") for v in labels):
-            skipped += 1
-            continue
         path = samples.get_path(draw_id, it.get("id"))
         if not path or not os.path.exists(path):
             skipped += 1
@@ -342,61 +303,53 @@ def train_draw(draw_id: str):
             full = ROI(0, 0, sw, sh)
             boxes = detector._find_three_boxes(img, DetectorConfig(width=sw, height=sh, result_roi=full), full)
         if boxes is None:
-            # fallback: split equally
-            w3 = max(1, roi.w // 3)
-            boxes = [
-                ROI(roi.x + 0 * w3, roi.y, w3, roi.h),
-                ROI(roi.x + 1 * w3, roi.y, w3, roi.h),
-                ROI(roi.x + 2 * w3, roi.y, roi.w - 2 * w3, roi.h),
-            ]
-
-        for idx, b in enumerate(boxes[:3]):
-            color = str(labels[idx]).lower().strip()
-            if not color or color not in ALLOWED_COLORS:
-                skipped += 1
-                continue
-            patch = img[b.y : b.y + b.h, b.x : b.x + b.w]
-            if patch.size == 0:
-                continue
-            ph, pw = patch.shape[:2]
-            cx0, cy0 = int(pw * 0.18), int(ph * 0.18)
-            cx1, cy1 = int(pw * 0.82), int(ph * 0.82)
-            inner = patch[cy0:cy1, cx0:cx1]
-
-            hsv = cv2.cvtColor(inner, cv2.COLOR_BGR2HSV)
-            hh = hsv[:, :, 0].astype(np.float32)
-            ss = hsv[:, :, 1].astype(np.float32)
-            vv = hsv[:, :, 2].astype(np.float32)
-            valid = (vv > 60) & ((ss > 25) | (vv > 185))
-            if int(valid.sum()) < max(50, int(hh.size * 0.08)):
-                continue
-            mh = float(np.mean(hh[valid]))
-            ms = float(np.mean(ss[valid]))
-            mv = float(np.mean(vv[valid]))
-            buckets.setdefault(color, []).append((mh, ms, mv))
+            skipped += 1
+            continue
 
         used += 1
+        for idx, b in enumerate(boxes[:3]):
+            if roi.w <= 1 or roi.h <= 1:
+                continue
+            rels[idx].append(
+                (
+                    float(b.x - roi.x) / float(roi.w),
+                    float(b.y - roi.y) / float(roi.h),
+                    float(b.w) / float(roi.w),
+                    float(b.h) / float(roi.h),
+                )
+            )
 
-    if not buckets:
-        return Response(content=b"no labeled pixels found\n", status_code=400, media_type="text/plain")
+    if min(len(rels[0]), len(rels[1]), len(rels[2])) < 3:
+        return Response(content=b"not enough usable samples (need >= 3)\n", status_code=400, media_type="text/plain")
 
-    # circular mean for hue
-    centroids = {}
-    for color, vals in buckets.items():
-        hs = [v[0] for v in vals]
-        ss = [v[1] for v in vals]
-        vv = [v[2] for v in vals]
-        # hue in radians (0..2pi)
-        ang = [float(h) * (2.0 * math.pi / 180.0) for h in hs]
-        sinm = sum(math.sin(a) for a in ang) / float(len(ang))
-        cosm = sum(math.cos(a) for a in ang) / float(len(ang))
-        mean_ang = math.atan2(sinm, cosm)
-        if mean_ang < 0:
-            mean_ang += 2.0 * math.pi
-        mean_h = mean_ang * (180.0 / (2.0 * math.pi))
-        centroids[color] = {"h": float(mean_h), "s": float(sum(ss) / len(ss)), "v": float(sum(vv) / len(vv)), "n": len(vals)}
+    def median(vals: list[float]) -> float:
+        arr = sorted(vals)
+        mid = len(arr) // 2
+        if len(arr) % 2 == 1:
+            return float(arr[mid])
+        return float((arr[mid - 1] + arr[mid]) / 2.0)
 
-    model = {"version": 1, "trained_at": time.time(), "centroids": centroids, "used_samples": used, "skipped": skipped}
+    boxes_rel = []
+    for idx in range(3):
+        xs = [v[0] for v in rels[idx]]
+        ys = [v[1] for v in rels[idx]]
+        ws = [v[2] for v in rels[idx]]
+        hs = [v[3] for v in rels[idx]]
+        boxes_rel.append(
+            {
+                "x": median(xs),
+                "y": median(ys),
+                "w": median(ws),
+                "h": median(hs),
+                "n": len(rels[idx]),
+            }
+        )
+
+    model = {
+        "version": 2,
+        "trained_at": time.time(),
+        "layout": {"boxes_rel": boxes_rel, "used_samples": used, "skipped": skipped},
+    }
     d2 = draws.update(draw_id, {"model": model})
     try:
         _sync_detector_with_active_draw()

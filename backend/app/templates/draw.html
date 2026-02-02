@@ -33,28 +33,26 @@
   <div class="row between">
     <div>
       <h2 style="margin-bottom: 6px;">Training Samples</h2>
-      <div class="muted">Upload labeled screenshots so we can train a per-draw color model.</div>
+      <div class="muted">Upload screenshots that show the RESULT UI (the word RESULT + 3 square color boxes).</div>
+      <div class="muted">We train a small layout model so OpenCV reliably finds the 3 boxes. No color labels needed.</div>
       <div class="muted">Draw selected: <span id="samplesDrawName" class="mono"></span></div>
     </div>
     <div class="row">
       <input id="sampleFiles" type="file" multiple accept="image/png,image/jpeg" />
       <button class="btn" id="uploadBtn">Upload</button>
-      <button class="btn primary" id="trainBtn">Train Model</button>
+      <button class="btn primary" id="trainBtn">Train Layout</button>
     </div>
   </div>
 
   <div class="row">
-    <span class="muted">Label each image (left / middle / right colors). Then click Train.</span>
+    <span class="muted">Upload several images (3+). Then click Train Layout.</span>
     <span id="trainMsg" class="mono"></span>
   </div>
 
   <table class="table" style="margin-top: 10px;">
     <thead>
       <tr>
-        <th style="width: 220px;">Image</th>
-        <th style="width: 160px;">Left</th>
-        <th style="width: 160px;">Middle</th>
-        <th style="width: 160px;">Right</th>
+        <th>Image</th>
         <th style="width: 120px;"></th>
       </tr>
     </thead>
@@ -168,7 +166,7 @@
       tdEnabled.innerHTML = `<input type="checkbox" data-act="toggle" data-id="${d.id}" ${d.enabled ? 'checked' : ''} />`;
 
       const tdModel = document.createElement('td');
-      tdModel.textContent = d.model ? 'trained' : '';
+      tdModel.textContent = (d.model && d.model.layout) ? 'layout' : '';
 
       const tdActions = document.createElement('td');
       tdActions.className = 'right';
@@ -336,12 +334,6 @@
 
   document.getElementById('newBtn').addEventListener('click', () => createAndEdit());
 
-  function colorOptionsHtml(selected) {
-    const colors = ['yellow','white','pink','blue','red','green'];
-    const opts = ['<option value=\"\">(unset)</option>'].concat(colors.map(c => `<option value=\"${c}\" ${selected===c?'selected':''}>${c}</option>`));
-    return opts.join('');
-  }
-
   async function openSamples(drawId) {
     const d = state.draws.find(x => x.id === drawId);
     if (!d) return;
@@ -366,22 +358,11 @@
       const tdImg = document.createElement('td');
       tdImg.innerHTML = `<a class=\"muted\" target=\"_blank\" rel=\"noopener\" href=\"/api/draws/${drawId}/samples/${it.id}\">${it.orig_name || it.filename || it.id}</a>`;
 
-      const labels = Array.isArray(it.labels) ? it.labels : ['', '', ''];
-      const tdL = document.createElement('td');
-      const tdM = document.createElement('td');
-      const tdR = document.createElement('td');
-      tdL.innerHTML = `<select data-sel=\"l\" data-id=\"${it.id}\">${colorOptionsHtml(labels[0])}</select>`;
-      tdM.innerHTML = `<select data-sel=\"m\" data-id=\"${it.id}\">${colorOptionsHtml(labels[1])}</select>`;
-      tdR.innerHTML = `<select data-sel=\"r\" data-id=\"${it.id}\">${colorOptionsHtml(labels[2])}</select>`;
-
       const tdAct = document.createElement('td');
       tdAct.className = 'right';
       tdAct.innerHTML = `<button class=\"btn danger\" data-act=\"del-sample\" data-id=\"${it.id}\">Delete</button>`;
 
       tr.appendChild(tdImg);
-      tr.appendChild(tdL);
-      tr.appendChild(tdM);
-      tr.appendChild(tdR);
       tr.appendChild(tdAct);
       tbody.appendChild(tr);
     }
@@ -405,26 +386,15 @@
     document.getElementById('trainMsg').textContent = 'training...';
     const r = await fetch(`/api/draws/${drawId}/train`, { method: 'POST' });
     if (!r.ok) {
-      document.getElementById('trainMsg').textContent = `train failed (${r.status})`;
+      let msg = '';
+      try { msg = (await r.text()).trim(); } catch (_) {}
+      document.getElementById('trainMsg').textContent = msg ? msg : `train failed (${r.status})`;
       return;
     }
     const j = await r.json();
-    const cents = (j.model && j.model.centroids) ? Object.keys(j.model.centroids).length : 0;
-    document.getElementById('trainMsg').textContent = `trained: ${cents} colors`;
+    const n = (j.model && j.model.layout && Array.isArray(j.model.layout.boxes_rel)) ? j.model.layout.boxes_rel.length : 0;
+    document.getElementById('trainMsg').textContent = `trained: ${n} boxes`;
     await load();
-  });
-
-  document.getElementById('sampleRows').addEventListener('change', async (e) => {
-    const sel = e.target.closest('select[data-id]');
-    if (!sel) return;
-    const drawId = state.samplesDrawId;
-    if (!drawId) return;
-    const sampleId = sel.getAttribute('data-id');
-    const row = sel.closest('tr');
-    const sels = row.querySelectorAll('select[data-id]');
-    const vals = Array.from(sels).map(s => s.value || '');
-    const labels = (vals.some(v => v === '')) ? null : vals;
-    await fetch(`/api/draws/${drawId}/samples/${sampleId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ labels }) });
   });
 
   document.getElementById('sampleRows').addEventListener('click', async (e) => {

@@ -43,7 +43,7 @@ class DetectorConfig:
     # same colors again when RESULT appears again (consecutive games can repeat).
     gap_reset_frames: int = 15
 
-    # Optional trained model from user-labeled samples.
+    # Optional trained layout model from user-provided screenshots.
     model: Optional[dict] = None
 
 
@@ -121,58 +121,6 @@ class ColorClassifier:
         # Normalize to [0..1] with a slight boost for very dominant colors.
         conf = min(1.0, conf * 1.25)
         return color, conf, {"ratios": ratios, "valid_ratio": float(valid_count) / float(max(1, total))}
-
-    @staticmethod
-    def classify_patch_with_model(patch_bgr: np.ndarray, model: dict) -> Tuple[str, float, Dict[str, float]]:
-        """
-        Model-based classifier trained from user-labeled samples.
-        Model format:
-          { "version": 1, "centroids": { color: { "h": float, "s": float, "v": float, "n": int } } }
-        """
-        if patch_bgr.size == 0:
-            return "unknown", 0.0, {"error": "empty"}
-
-        centroids = (model or {}).get("centroids") or {}
-        if not centroids:
-            return ColorClassifier.classify_patch(patch_bgr)
-
-        hsv = cv2.cvtColor(patch_bgr, cv2.COLOR_BGR2HSV)
-        h = hsv[:, :, 0].astype(np.float32)
-        s = hsv[:, :, 1].astype(np.float32)
-        v = hsv[:, :, 2].astype(np.float32)
-
-        valid = (v > 60) & ((s > 25) | (v > 185))
-        if int(valid.sum()) < max(50, int(h.size * 0.08)):
-            return "unknown", 0.0, {"valid_ratio": float(valid.sum()) / float(max(1, h.size))}
-
-        mh = float(np.mean(h[valid]))
-        ms = float(np.mean(s[valid]))
-        mv = float(np.mean(v[valid]))
-
-        def hue_dist(a: float, b: float) -> float:
-            d = abs(a - b)
-            return min(d, 180.0 - d)
-
-        best_name = "unknown"
-        best_d = 1e9
-        for name, c in centroids.items():
-            try:
-                ch = float(c["h"])
-                cs = float(c["s"])
-                cv = float(c["v"])
-            except Exception:
-                continue
-            d = hue_dist(mh, ch) * 2.0 + abs(ms - cs) * 0.02 + abs(mv - cv) * 0.01
-            if d < best_d:
-                best_d = d
-                best_name = str(name)
-
-        if best_name == "unknown" or best_d >= 40.0:
-            return "unknown", 0.0, {"mh": mh, "ms": ms, "mv": mv, "dist": best_d}
-
-        conf = float(max(0.0, 1.0 - (best_d / 40.0)))
-        return best_name, conf, {"mh": mh, "ms": ms, "mv": mv, "dist": best_d}
-
 
 class ResultDetector:
     def __init__(
@@ -484,9 +432,39 @@ class ResultDetector:
         rr = cfg.result_roi
 
         # Find the 3 square result boxes inside the ROI.
-        boxes = self._find_three_boxes(frame, cfg, rr)
+        # Prefer a trained layout model (fast + stable). Fallback to contour detection,
+        # and finally to a naive "split into thirds".
+        boxes: Optional[List[ROI]] = None
+        box_source = "split"
+
+        layout = (cfg.model or {}).get("layout") if isinstance(cfg.model, dict) else None
+        rel = (layout or {}).get("boxes_rel") if isinstance(layout, dict) else None
+        if isinstance(rel, list) and len(rel) >= 3:
+            try:
+                out: List[ROI] = []
+                for i in range(3):
+                    r = rel[i] if isinstance(rel[i], dict) else {}
+                    bx = rr.x + int(float(r.get("x", 0.0)) * rr.w)
+                    by = rr.y + int(float(r.get("y", 0.0)) * rr.h)
+                    bw = max(1, int(float(r.get("w", 0.0)) * rr.w))
+                    bh = max(1, int(float(r.get("h", 0.0)) * rr.h))
+                    # clamp to frame bounds
+                    bx = max(0, min(cfg.width - 1, bx))
+                    by = max(0, min(cfg.height - 1, by))
+                    bw = max(1, min(cfg.width - bx, bw))
+                    bh = max(1, min(cfg.height - by, bh))
+                    out.append(ROI(bx, by, bw, bh))
+                boxes = out
+                box_source = "layout"
+            except Exception:
+                boxes = None
+
         if boxes is None:
-            # Fallback: assume ROI is only the 3 boxes and split evenly.
+            boxes = self._find_three_boxes(frame, cfg, rr)
+            if boxes is not None:
+                box_source = "contours"
+
+        if boxes is None:
             thirds: List[ROI] = []
             w3 = max(1, rr.w // 3)
             for i in range(3):
@@ -514,10 +492,7 @@ class ResultDetector:
             cx1, cy1 = int(pw * 0.82), int(ph * 0.82)
             inner = patch[cy0:cy1, cx0:cx1]
 
-            if cfg.model:
-                name, conf, extra = ColorClassifier.classify_patch_with_model(inner, cfg.model)
-            else:
-                name, conf, extra = ColorClassifier.classify_patch(inner)
+            name, conf, extra = ColorClassifier.classify_patch(inner)
             colors.append(name)
             confs.append(conf)
             debug.append(
@@ -526,6 +501,7 @@ class ResultDetector:
                     "patch_shape": [int(inner.shape[1]), int(inner.shape[0])],
                     "confidence": conf,
                     "color": name,
+                    "box_source": box_source,
                     "extra": extra,
                 }
             )
