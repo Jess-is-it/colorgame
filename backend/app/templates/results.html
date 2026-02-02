@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>Results</h2>
+  <p class="muted">Showing the most recent 100 results.</p>
+
+  <table class="table">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Preset</th>
+        <th>Confidence</th>
+        <th>Parsed</th>
+        <th>Raw OCR</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in results %}
+        <tr>
+          <td class="mono">{{ r.created_at }}</td>
+          <td class="mono">{{ r.preset_id }}</td>
+          <td class="mono">{{ "%.2f"|format(r.confidence) }}</td>
+          <td class="mono">{{ r.parsed_result_json }}</td>
+          <td class="mono pre">{{ r.raw_text }}</td>
+        </tr>
+      {% endfor %}
+      {% if results|length == 0 %}
+        <tr><td class="muted" colspan="5">No results yet.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

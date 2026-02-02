@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="row between">
+    <h2>Presets</h2>
+    <a class="btn primary" href="/presets/new">New preset</a>
+  </div>
+
+  {% if presets|length == 0 %}
+    <p class="muted">No presets yet. Create one to define ROI(s) and keywords.</p>
+  {% else %}
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Resolution</th>
+          <th>ROIs</th>
+          <th>Keywords</th>
+          <th>Threshold</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in presets %}
+        <tr>
+          <td>{{ p.name }}</td>
+          <td class="mono">{{ p.input_width }}x{{ p.input_height }}</td>
+          <td class="mono">{{ (p.rois|length) }}</td>
+          <td class="mono">{{ (p.keywords|join(", ")) }}</td>
+          <td class="mono">{{ "%.2f"|format(p.confidence_threshold) }}</td>
+          <td class="right">
+            <a class="btn" href="/presets/{{ p.id }}">Edit</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>
+{% endblock %}
