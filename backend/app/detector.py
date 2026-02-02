@@ -59,53 +59,65 @@ class ColorClassifier:
     COLORS = ("yellow", "white", "pink", "blue", "red", "green")
 
     @staticmethod
-    def classify_bgr(bgr_mean: np.ndarray) -> Tuple[str, float, Dict[str, float]]:
-        bgr = bgr_mean.astype(np.uint8).reshape(1, 1, 3)
-        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV).reshape(3)
-        h, s, v = float(hsv[0]), float(hsv[1]), float(hsv[2])
+    def classify_patch(patch_bgr: np.ndarray) -> Tuple[str, float, Dict[str, float]]:
+        """
+        Classify a patch that is mostly a flat UI color (one of the square result boxes).
 
-        # too dark or too gray -> unknown
-        if v < 35:
-            return "unknown", 0.0, {"h": h, "s": s, "v": v}
-        if s < 12 and v < 180:
-            return "unknown", 0.0, {"h": h, "s": s, "v": v}
+        Uses pixel proportions in HSV ranges rather than a single mean, which is more robust
+        to gradients/borders/compression.
+        """
+        if patch_bgr.size == 0:
+            return "unknown", 0.0, {"error": "empty"}
 
-        # white: low saturation, high value
-        if s < 35 and v > 160:
-            # confidence increases as saturation decreases and value increases
-            conf = min(1.0, (max(0.0, 60.0 - s) / 60.0) * (min(255.0, v) / 255.0))
-            return "white", conf, {"h": h, "s": s, "v": v}
+        hsv = cv2.cvtColor(patch_bgr, cv2.COLOR_BGR2HSV)
+        h = hsv[:, :, 0].astype(np.int16)
+        s = hsv[:, :, 1].astype(np.int16)
+        v = hsv[:, :, 2].astype(np.int16)
 
-        # OpenCV hue: [0..179]
-        # We'll use broad bands and a simple distance-to-center score.
-        # These centers are typical for vivid colors.
-        centers = {
-            "red": (0.0, 10.0),  # red wraps around; handle separately
-            "yellow": (27.0, 20.0),
-            "green": (70.0, 25.0),
-            "blue": (110.0, 25.0),
-            "pink": (165.0, 25.0),
+        # Valid colored pixels (ignore very dark/gray noise)
+        valid = (v > 60) & (s > 35)
+        total = int(h.size)
+        valid_count = int(valid.sum())
+
+        # White detection: lots of bright, low-s pixels.
+        white_mask = (v > 185) & (s < 35)
+        white_ratio = float(white_mask.sum()) / float(max(1, total))
+        if white_ratio > 0.35:
+            # increase confidence when it's very white and not much saturated color
+            conf = min(1.0, white_ratio + (0.2 if valid_count < (total * 0.2) else 0.0))
+            return "white", conf, {"white_ratio": white_ratio, "valid_ratio": float(valid_count) / float(max(1, total))}
+
+        if valid_count < max(50, int(total * 0.08)):
+            return "unknown", 0.0, {"valid_ratio": float(valid_count) / float(max(1, total))}
+
+        hh = h[valid]
+
+        def ratio_in(lo: int, hi: int) -> float:
+            if lo <= hi:
+                return float(((hh >= lo) & (hh <= hi)).sum()) / float(max(1, hh.size))
+            # wrap-around range
+            return float(((hh >= lo) | (hh <= hi)).sum()) / float(max(1, hh.size))
+
+        # OpenCV hue ranges (0..179). Tuned for bright UI colors.
+        ratios = {
+            # red often looks orange under UI glow; include 0..16 and wrap-around.
+            "red": ratio_in(0, 16) + ratio_in(165, 179),
+            "yellow": ratio_in(17, 40),
+            "green": ratio_in(45, 85),
+            "blue": ratio_in(90, 130),
+            # magenta/pink
+            "pink": ratio_in(135, 164),
         }
 
-        def hue_dist(a: float, b: float) -> float:
-            d = abs(a - b)
-            return min(d, 180.0 - d)
+        color = max(ratios, key=lambda k: ratios[k])
+        conf = float(ratios[color])
 
-        best = None
-        best_score = -1.0
-        for name, (center_h, tol) in centers.items():
-            d = hue_dist(h, center_h)
-            score = max(0.0, 1.0 - (d / max(1.0, tol)))
-            # penalize low saturation / low value
-            score *= min(1.0, s / 100.0) * min(1.0, v / 120.0)
-            if score > best_score:
-                best_score = score
-                best = name
+        if conf < 0.25:
+            return "unknown", 0.0, {"ratios": ratios, "valid_ratio": float(valid_count) / float(max(1, total))}
 
-        if best is None:
-            return "unknown", 0.0, {"h": h, "s": s, "v": v}
-
-        return best, float(best_score), {"h": h, "s": s, "v": v}
+        # Normalize to [0..1] with a slight boost for very dominant colors.
+        conf = min(1.0, conf * 1.25)
+        return color, conf, {"ratios": ratios, "valid_ratio": float(valid_count) / float(max(1, total))}
 
 
 class ResultDetector:
@@ -397,16 +409,21 @@ class ResultDetector:
         if cfg.result_roi is None:
             return ["unknown", "unknown", "unknown"], [0.0, 0.0, 0.0], [{"error": "result_roi not set"}]
 
-        # Split a single ROI into 3 equal-width boxes (left -> right).
         rr = cfg.result_roi
-        thirds = []
-        w3 = max(1, rr.w // 3)
-        for i in range(3):
-            x = rr.x + i * w3
-            w = w3 if i < 2 else rr.w - 2 * w3
-            thirds.append(ROI(x, rr.y, w, rr.h))
 
-        for roi in thirds:
+        # Find the 3 square result boxes inside the ROI.
+        boxes = self._find_three_boxes(frame, cfg, rr)
+        if boxes is None:
+            # Fallback: assume ROI is only the 3 boxes and split evenly.
+            thirds: List[ROI] = []
+            w3 = max(1, rr.w // 3)
+            for i in range(3):
+                x = rr.x + i * w3
+                w = w3 if i < 2 else rr.w - 2 * w3
+                thirds.append(ROI(x, rr.y, w, rr.h))
+            boxes = thirds
+
+        for roi in boxes:
             x0 = max(0, roi.x)
             y0 = max(0, roi.y)
             x1 = min(cfg.width, roi.x + roi.w)
@@ -420,23 +437,111 @@ class ResultDetector:
                 continue
 
             # sample the center region to avoid rounded borders/shadows
-            h, w = patch.shape[:2]
-            cx0, cy0 = int(w * 0.2), int(h * 0.2)
-            cx1, cy1 = int(w * 0.8), int(h * 0.8)
+            ph, pw = patch.shape[:2]
+            cx0, cy0 = int(pw * 0.18), int(ph * 0.18)
+            cx1, cy1 = int(pw * 0.82), int(ph * 0.82)
             inner = patch[cy0:cy1, cx0:cx1]
-            mean_bgr = inner.reshape(-1, 3).mean(axis=0)
 
-            name, conf, hsv = ColorClassifier.classify_bgr(mean_bgr)
+            name, conf, extra = ColorClassifier.classify_patch(inner)
             colors.append(name)
             confs.append(conf)
             debug.append(
                 {
                     "roi": {"x": roi.x, "y": roi.y, "w": roi.w, "h": roi.h},
-                    "mean_bgr": [float(mean_bgr[0]), float(mean_bgr[1]), float(mean_bgr[2])],
-                    "hsv": hsv,
+                    "patch_shape": [int(inner.shape[1]), int(inner.shape[0])],
                     "confidence": conf,
                     "color": name,
+                    "extra": extra,
                 }
             )
 
         return colors, confs, debug
+
+    def _find_three_boxes(self, frame: np.ndarray, cfg: DetectorConfig, rr: ROI) -> Optional[List[ROI]]:
+        """
+        Try to locate the 3 square UI boxes inside the configured ROI.
+        This allows users to draw a larger ROI that includes the "RESULT" text.
+        """
+        x0 = max(0, rr.x)
+        y0 = max(0, rr.y)
+        x1 = min(cfg.width, rr.x + rr.w)
+        y1 = min(cfg.height, rr.y + rr.h)
+        region = frame[y0:y1, x0:x1]
+        if region.size == 0:
+            return None
+
+        gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(gray, 50, 150)
+
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+
+        rr_h, rr_w = region.shape[:2]
+        rr_area = float(rr_h * rr_w)
+        cands: List[Tuple[float, ROI]] = []
+
+        for c in contours:
+            x, y, w, h = cv2.boundingRect(c)
+            if w < 12 or h < 12:
+                continue
+            area = float(w * h)
+            if area < max(800.0, rr_area * 0.01) or area > rr_area * 0.6:
+                continue
+            ar = float(w) / float(h)
+            if ar < 0.75 or ar > 1.35:
+                continue
+            # In the sample UI, boxes are on the right side.
+            if x < int(rr_w * 0.35):
+                continue
+            cands.append((area, ROI(rr.x + x, rr.y + y, w, h)))
+
+        if len(cands) < 3:
+            return None
+
+        # Prefer larger boxes.
+        cands.sort(key=lambda t: t[0], reverse=True)
+        rois = [r for _, r in cands[:20]]
+
+        # Find best triplet that is aligned on a row and has similar sizes.
+        best: Optional[Tuple[float, List[ROI]]] = None
+        for i in range(len(rois)):
+            for j in range(i + 1, len(rois)):
+                for k in range(j + 1, len(rois)):
+                    trio = [rois[i], rois[j], rois[k]]
+                    trio.sort(key=lambda r: r.x)
+
+                    ys = [r.y for r in trio]
+                    hs = [r.h for r in trio]
+                    ws = [r.w for r in trio]
+
+                    y_span = max(ys) - min(ys)
+                    h_med = sorted(hs)[1]
+                    if y_span > max(10, int(h_med * 0.25)):
+                        continue
+
+                    # size similarity
+                    if max(ws) - min(ws) > max(12, int(sorted(ws)[1] * 0.25)):
+                        continue
+                    if max(hs) - min(hs) > max(12, int(h_med * 0.25)):
+                        continue
+
+                    # spacing should be reasonable and increasing
+                    gaps = [trio[1].x - (trio[0].x + trio[0].w), trio[2].x - (trio[1].x + trio[1].w)]
+                    if gaps[0] < -5 or gaps[1] < -5:
+                        continue
+                    if gaps[0] > rr.w or gaps[1] > rr.w:
+                        continue
+
+                    score = float(sum(ws) + sum(hs)) - float(y_span) * 2.0 - float(abs(gaps[0] - gaps[1])) * 0.5
+                    if best is None or score > best[0]:
+                        best = (score, trio)
+
+        if best is None:
+            return None
+
+        # Normalize to exactly 3, left->right.
+        trio = best[1]
+        trio.sort(key=lambda r: r.x)
+        return trio
