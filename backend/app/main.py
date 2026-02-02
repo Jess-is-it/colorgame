@@ -1,15 +1,13 @@
 from __future__ import annotations
 
+import json
 import time
-
 import urllib.request
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-
-from app.services import rtmp_status as rtmp_status_service
 
 app = FastAPI(title="OBS Stream Dashboard")
 
@@ -30,57 +28,64 @@ def dashboard(request: Request):
     host = (request.headers.get("host") or "").split(",")[0].strip()
     hostname = host.split(":")[0] if host else "VM_IP"
 
-    # Serve HLS via the backend so users only need port 8000 open.
-    hls_url = f"http://{hostname}:8000/hls/stream.m3u8"
-    stat_url = f"http://{hostname}:8000/rtmp/stat"
+    # Keep defaults aligned with the OBS "Server + Stream key" format most users expect.
+    stream_path = "live/stream"
+    rtmp_server = f"rtmp://{hostname}:1935/live"
+    rtmp_stream_key = "stream"
+    webrtc_player_url = f"http://{hostname}:8889/{stream_path}"
 
     return templates.TemplateResponse(
         request,
         "dashboard.html",
-        {"hls_url": hls_url, "stat_url": stat_url},
+        {
+            "rtmp_server": rtmp_server,
+            "rtmp_stream_key": rtmp_stream_key,
+            "webrtc_player_url": webrtc_player_url,
+            "stream_path": stream_path,
+        },
     )
 
 
-@app.get("/api/rtmp/status")
-def rtmp_status():
-    # rtmp container is reachable inside docker network as http://rtmp/stat
+@app.get("/api/stream/status")
+def stream_status():
+    """
+    Report whether OBS is publishing to MediaMTX and basic stream metadata.
+
+    We query the MediaMTX control API (host network) to avoid scraping HTML pages
+    and to provide a reliable 'connected/disconnected' signal.
+    """
     try:
-        return rtmp_status_service.get_publish_status(stat_url="http://rtmp/stat", expected_app="live")
-    except Exception as e:
-        return {"ok": False, "error": str(e), "publishing": False, "streams": []}
+        # Prefer listing and filtering by name since some path names contain slashes.
+        with urllib.request.urlopen("http://127.0.0.1:9997/v3/paths/list", timeout=1.5) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            data = json.loads(body)
 
-
-@app.get("/rtmp/stat")
-def rtmp_stat_proxy():
-    # Proxy the RTMP stats XML for convenience.
-    try:
-        with urllib.request.urlopen("http://rtmp/stat", timeout=2.0) as resp:
-            body = resp.read()
-            return Response(content=body, media_type="application/xml")
-    except Exception as e:
-        return Response(content=f"error: {e}\n".encode("utf-8"), status_code=502, media_type="text/plain")
-
-
-@app.get("/hls/{path:path}")
-def hls_proxy(path: str):
-    # Proxy HLS files (m3u8/ts) from the rtmp container to avoid cross-origin + extra port.
-    # NOTE: This keeps the MVP simple; for heavy traffic you'd put nginx in front.
-    url = f"http://rtmp/hls/{path}"
-
-    def gen():
-        with urllib.request.urlopen(url, timeout=5.0) as resp:
-            while True:
-                chunk = resp.read(64 * 1024)
-                if not chunk:
+        target = None
+        for item in (data.get("items") or []):
+            if item.get("name") == "live/stream":
+                target = item
+                break
+        if target is None:
+            for item in (data.get("items") or []):
+                if item.get("name") == "obs":
+                    target = item
                     break
-                yield chunk
 
-    # Light content-type mapping (fallback to octet-stream).
-    if path.endswith(".m3u8"):
-        media_type = "application/vnd.apple.mpegurl"
-    elif path.endswith(".ts"):
-        media_type = "video/mp2t"
-    else:
-        media_type = "application/octet-stream"
+        if target is None:
+            return {"ok": True, "publishing": False, "path": "live/stream", "ready": False, "tracks": []}
 
-    return StreamingResponse(gen(), media_type=media_type)
+        # If a publisher exists, "source" is typically present and "ready" becomes true.
+        publishing = bool(target.get("ready")) or target.get("source") is not None
+        return {
+            "ok": True,
+            "publishing": publishing,
+            "path": target.get("name") or "live/stream",
+            "ready": bool(target.get("ready")),
+            "tracks": target.get("tracks") or [],
+            "bytesReceived": target.get("bytesReceived", 0),
+            "readers": target.get("readers") or [],
+            "source": target.get("source"),
+        }
+    except Exception as e:
+        # When not publishing yet, MediaMTX can return 404; keep it simple for the UI.
+        return {"ok": False, "error": str(e), "publishing": False, "path": "live/stream"}

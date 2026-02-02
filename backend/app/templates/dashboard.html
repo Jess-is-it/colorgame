@@ -1,78 +1,67 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="card">
-  <h2>Live Feed</h2>
+  <h2>Dashboard</h2>
 
   <div class="row">
-    <span class="muted">RTMP publish status:</span>
-    <span id="rtmpPublish" class="mono">checking...</span>
-    <a class="muted" href="{{ stat_url }}" target="_blank" rel="noopener">rtmp stat</a>
+    <span class="muted">Stream status:</span>
+    <span id="streamStatus" class="mono">checking…</span>
+    <span id="streamTracks" class="muted"></span>
   </div>
 
-  <div class="row">
-    <span class="muted">HLS URL:</span>
-    <span class="mono">{{ hls_url }}</span>
-  </div>
+  <details style="margin-top: 10px;">
+    <summary>OBS Settings (RTMP)</summary>
+    <div style="margin-top: 8px;">
+      <div class="row">
+        <span class="muted">Service:</span>
+        <span class="mono">Custom…</span>
+      </div>
+      <div class="row">
+        <span class="muted">Server:</span>
+        <span class="mono">{{ rtmp_server }}</span>
+      </div>
+      <div class="row">
+        <span class="muted">Stream key:</span>
+        <span class="mono">{{ rtmp_stream_key }}</span>
+      </div>
+      <div class="row">
+        <span class="muted">Tip:</span>
+        <span class="muted">For browser compatibility, use H.264 video + AAC audio in OBS.</span>
+      </div>
+    </div>
+  </details>
 
   <div class="preview" style="margin-top: 12px;">
-    <video id="video" controls autoplay muted playsinline></video>
-    <div id="videoMsg" class="muted">Loading stream…</div>
+    <iframe
+      id="playerFrame"
+      title="Live feed"
+      src="{{ webrtc_player_url }}"
+      allow="autoplay; fullscreen; picture-in-picture"
+      allowfullscreen
+      referrerpolicy="no-referrer"
+    ></iframe>
+  </div>
+
+  <div class="row" style="margin-top: 10px;">
+    <a class="muted" href="{{ webrtc_player_url }}" target="_blank" rel="noopener">Open player in new tab</a>
   </div>
 </section>
 
-<script src="/static/hls.min.js?v={{ static_version }}"></script>
 <script>
-  const hlsUrl = {{ hls_url | tojson }};
-
-  async function pollRtmp() {
+  async function pollStatus() {
     try {
-      const r = await fetch('/api/rtmp/status');
+      const r = await fetch('/api/stream/status');
       const j = await r.json();
       const pub = !!j.publishing;
-      document.getElementById('rtmpPublish').textContent = pub ? 'publishing' : 'not publishing';
+      document.getElementById('streamStatus').textContent = pub ? 'connected (publishing)' : 'disconnected';
+      const tracks = Array.isArray(j.tracks) ? j.tracks.join(' · ') : '';
+      document.getElementById('streamTracks').textContent = tracks ? `(${tracks})` : '';
     } catch (_) {
-      document.getElementById('rtmpPublish').textContent = 'unknown';
+      document.getElementById('streamStatus').textContent = 'unknown';
+      document.getElementById('streamTracks').textContent = '';
     }
-    setTimeout(pollRtmp, 1000);
+    setTimeout(pollStatus, 1000);
   }
-  pollRtmp();
-
-  const video = document.getElementById('video');
-  const msg = document.getElementById('videoMsg');
-
-  // Use hls.js for Chrome/Firefox/Edge. Safari can play HLS natively.
-  (function start() {
-    if (video.canPlayType('application/vnd.apple.mpegurl')) {
-      msg.textContent = 'Using native HLS…';
-      video.src = hlsUrl;
-      msg.textContent = '';
-      return;
-    }
-
-    if (!window.Hls || !window.Hls.isSupported()) {
-      msg.textContent = 'HLS not supported in this browser.';
-      return;
-    }
-
-    msg.textContent = 'Attaching HLS…';
-    const hls = new window.Hls({
-      // Aggressive low-latency HLS tuning. This may stutter on weaker networks.
-      lowLatencyMode: true,
-      liveSyncDurationCount: 1,
-      liveMaxLatencyDurationCount: 3,
-      maxLiveSyncPlaybackRate: 1.5,
-      maxBufferLength: 2,
-      backBufferLength: 0,
-    });
-
-    hls.on(window.Hls.Events.ERROR, function (_evt, data) {
-      const details = data && data.details ? String(data.details) : 'unknown';
-      msg.textContent = `HLS error: ${details} (waiting/retrying…)`;
-    });
-
-    hls.loadSource(hlsUrl);
-    hls.attachMedia(video);
-    msg.textContent = '';
-  })();
+  pollStatus();
 </script>
 {% endblock %}
