@@ -4,6 +4,19 @@ Headless Ubuntu MVP to ingest an OBS live stream (RTMP), sample frames, OCR regi
 
 ## Quick start (VM)
 
+### Option A: Without Docker (recommended on a plain Ubuntu VM)
+
+```bash
+./scripts/install_system_deps_ubuntu.sh
+./scripts/run_mvp.sh
+```
+
+Then open:
+
+- `http://<VM_IP>:8000`
+
+### Option B: With Docker Compose
+
 1) Start services:
 
 ```bash
@@ -59,7 +72,7 @@ Score:\s*(?P<score>\d+)
 - `ffmpeg` (decode RTMP, sample frames)
 - `tesseract-ocr` + `tesseract-ocr-eng` (OCR)
 
-If you want to run without Docker, you'll need to install those packages via `apt` and create a Python venv (not documented for MVP).
+Without Docker, `./scripts/install_system_deps_ubuntu.sh` installs the needed system packages and `./scripts/run_mvp.sh` creates a local Python venv in `backend/.venv`.
 
 ## Repo layout
 
