@@ -56,8 +56,13 @@
 
     msg.textContent = 'Attaching HLS…';
     const hls = new window.Hls({
-      liveSyncDurationCount: 3,
-      maxLiveSyncPlaybackRate: 1.25,
+      // Aggressive low-latency HLS tuning. This may stutter on weaker networks.
+      lowLatencyMode: true,
+      liveSyncDurationCount: 1,
+      liveMaxLatencyDurationCount: 3,
+      maxLiveSyncPlaybackRate: 1.5,
+      maxBufferLength: 2,
+      backBufferLength: 0,
     });
 
     hls.on(window.Hls.Events.ERROR, function (_evt, data) {
