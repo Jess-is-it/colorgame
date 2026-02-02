@@ -9,8 +9,30 @@
     <span id="streamTracks" class="muted"></span>
   </div>
 
+  <details style="margin-top: 10px;" open>
+    <summary>OBS Settings (Recommended: WHIP / WebRTC)</summary>
+    <div style="margin-top: 8px;">
+      <div class="row">
+        <span class="muted">Service:</span>
+        <span class="mono">WHIP</span>
+      </div>
+      <div class="row">
+        <span class="muted">Server:</span>
+        <span class="mono">{{ whip_url }}</span>
+      </div>
+      <div class="row">
+        <span class="muted">Stream key:</span>
+        <span class="mono">(empty)</span>
+      </div>
+      <div class="row">
+        <span class="muted">Tip:</span>
+        <span class="muted">WHIP avoids the RTMP→WebRTC audio mismatch and is the lowest-latency path.</span>
+      </div>
+    </div>
+  </details>
+
   <details style="margin-top: 10px;">
-    <summary>OBS Settings (RTMP)</summary>
+    <summary>OBS Settings (Alternate: RTMP)</summary>
     <div style="margin-top: 8px;">
       <div class="row">
         <span class="muted">Service:</span>
@@ -25,8 +47,8 @@
         <span class="mono">{{ rtmp_stream_key }}</span>
       </div>
       <div class="row">
-        <span class="muted">Tip:</span>
-        <span class="muted">For browser compatibility, use H.264 video + AAC audio in OBS.</span>
+        <span class="muted">Note:</span>
+        <span class="muted">RTMP usually carries AAC audio; WebRTC playback may fail unless audio is Opus or disabled.</span>
       </div>
     </div>
   </details>

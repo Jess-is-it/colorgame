@@ -20,7 +20,15 @@ docker compose up --build -d
 
 - `http://<VM_IP>:8000`
 
-4) Configure OBS (on the host machine) to publish RTMP:
+4) Configure OBS (on the host machine).
+
+Recommended (lowest latency, works best with browser WebRTC):
+
+- Service: **WHIP**
+- Server: `http://<VM_IP>:8889/live/stream/whip`
+- Stream key: *(empty)*
+
+Alternate (RTMP ingest):
 
 - Service: **Custom...**
 - Server: `rtmp://<VM_IP>:1935/live`

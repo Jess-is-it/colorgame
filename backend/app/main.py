@@ -32,6 +32,8 @@ def dashboard(request: Request):
     stream_path = "live/stream"
     rtmp_server = f"rtmp://{hostname}:1935/live"
     rtmp_stream_key = "stream"
+    # Recommended for near-live browser playback: publish via WHIP (WebRTC) instead of RTMP.
+    whip_url = f"http://{hostname}:8889/{stream_path}/whip"
     webrtc_player_url = f"http://{hostname}:8889/{stream_path}"
 
     return templates.TemplateResponse(
@@ -40,6 +42,7 @@ def dashboard(request: Request):
         {
             "rtmp_server": rtmp_server,
             "rtmp_stream_key": rtmp_stream_key,
+            "whip_url": whip_url,
             "webrtc_player_url": webrtc_player_url,
             "stream_path": stream_path,
         },
