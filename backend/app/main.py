@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import time
 
+import urllib.request
+
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -28,9 +30,9 @@ def dashboard(request: Request):
     host = (request.headers.get("host") or "").split(",")[0].strip()
     hostname = host.split(":")[0] if host else "VM_IP"
 
-    # rtmp container exposes HLS on host port 8080 (see docker-compose.yml)
-    hls_url = f"http://{hostname}:8080/hls/stream.m3u8"
-    stat_url = f"http://{hostname}:8080/stat"
+    # Serve HLS via the backend so users only need port 8000 open.
+    hls_url = f"http://{hostname}:8000/hls/stream.m3u8"
+    stat_url = f"http://{hostname}:8000/rtmp/stat"
 
     return templates.TemplateResponse(
         request,
@@ -46,3 +48,39 @@ def rtmp_status():
         return rtmp_status_service.get_publish_status(stat_url="http://rtmp/stat", expected_app="live")
     except Exception as e:
         return {"ok": False, "error": str(e), "publishing": False, "streams": []}
+
+
+@app.get("/rtmp/stat")
+def rtmp_stat_proxy():
+    # Proxy the RTMP stats XML for convenience.
+    try:
+        with urllib.request.urlopen("http://rtmp/stat", timeout=2.0) as resp:
+            body = resp.read()
+            return Response(content=body, media_type="application/xml")
+    except Exception as e:
+        return Response(content=f"error: {e}\n".encode("utf-8"), status_code=502, media_type="text/plain")
+
+
+@app.get("/hls/{path:path}")
+def hls_proxy(path: str):
+    # Proxy HLS files (m3u8/ts) from the rtmp container to avoid cross-origin + extra port.
+    # NOTE: This keeps the MVP simple; for heavy traffic you'd put nginx in front.
+    url = f"http://rtmp/hls/{path}"
+
+    def gen():
+        with urllib.request.urlopen(url, timeout=5.0) as resp:
+            while True:
+                chunk = resp.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+
+    # Light content-type mapping (fallback to octet-stream).
+    if path.endswith(".m3u8"):
+        media_type = "application/vnd.apple.mpegurl"
+    elif path.endswith(".ts"):
+        media_type = "video/mp2t"
+    else:
+        media_type = "application/octet-stream"
+
+    return StreamingResponse(gen(), media_type=media_type)
