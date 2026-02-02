@@ -9,6 +9,7 @@ This MVP ingests a live OBS stream via RTMP, samples frames at a low FPS, runs O
   - Web UI (server-rendered HTML)
   - JSON API
   - Stream processing thread (ffmpeg -> raw frames -> OCR -> keyword match)
+  - Optional OBS automation via obs-websocket (start/stop/configure RTMP)
   - SQLite persistence + Alembic migrations
 
 ## Data flow
