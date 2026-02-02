@@ -7,7 +7,22 @@
     <span class="muted">Stream status:</span>
     <span id="streamStatus" class="mono">checking…</span>
     <span id="streamTracks" class="muted"></span>
+    <span id="streamSource" class="muted"></span>
   </div>
+
+  <details style="margin-top: 10px;">
+    <summary>Connection Debug</summary>
+    <div style="margin-top: 8px;">
+      <div class="row">
+        <span class="muted">WebRTC sessions:</span>
+        <span id="webrtcSessions" class="mono">checking…</span>
+      </div>
+      <div class="row">
+        <span class="muted">Latest ICE:</span>
+        <span id="webrtcIce" class="mono"></span>
+      </div>
+    </div>
+  </details>
 
   <details style="margin-top: 10px;" open>
     <summary>OBS Settings (Recommended: WHIP / WebRTC)</summary>
@@ -78,12 +93,38 @@
       document.getElementById('streamStatus').textContent = pub ? 'connected (publishing)' : 'disconnected';
       const tracks = Array.isArray(j.tracks) ? j.tracks.join(' · ') : '';
       document.getElementById('streamTracks').textContent = tracks ? `(${tracks})` : '';
+      const sourceType = j && j.source && j.source.type ? String(j.source.type) : '';
+      document.getElementById('streamSource').textContent = sourceType ? `source: ${sourceType}` : '';
     } catch (_) {
       document.getElementById('streamStatus').textContent = 'unknown';
       document.getElementById('streamTracks').textContent = '';
+      document.getElementById('streamSource').textContent = '';
     }
     setTimeout(pollStatus, 1000);
   }
   pollStatus();
+
+  async function pollWebrtc() {
+    try {
+      const r = await fetch('/api/webrtc/sessions');
+      const j = await r.json();
+      const items = Array.isArray(j.items) ? j.items : [];
+      document.getElementById('webrtcSessions').textContent = String(items.length);
+
+      if (items.length > 0) {
+        const last = items[items.length - 1];
+        const lc = last.localCandidate ? String(last.localCandidate) : '';
+        const rc = last.remoteCandidate ? String(last.remoteCandidate) : '';
+        document.getElementById('webrtcIce').textContent = `${lc}  <=  ${rc}`;
+      } else {
+        document.getElementById('webrtcIce').textContent = '';
+      }
+    } catch (_) {
+      document.getElementById('webrtcSessions').textContent = 'unknown';
+      document.getElementById('webrtcIce').textContent = '';
+    }
+    setTimeout(pollWebrtc, 1500);
+  }
+  pollWebrtc();
 </script>
 {% endblock %}

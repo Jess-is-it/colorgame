@@ -92,3 +92,17 @@ def stream_status():
     except Exception as e:
         # When not publishing yet, MediaMTX can return 404; keep it simple for the UI.
         return {"ok": False, "error": str(e), "publishing": False, "path": "live/stream"}
+
+
+@app.get("/api/webrtc/sessions")
+def webrtc_sessions():
+    """
+    Expose active WebRTC sessions so the dashboard can show if clients are actually connected,
+    and whether they're using UDP or TCP candidates (which impacts latency).
+    """
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:9997/v3/webrtcsessions/list", timeout=1.5) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            return json.loads(body)
+    except Exception as e:
+        return {"ok": False, "error": str(e), "items": []}
