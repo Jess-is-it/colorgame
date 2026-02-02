@@ -39,6 +39,10 @@ class DetectorConfig:
     # minimum confidence (per-box). If any box is below this, we consider the frame invalid.
     min_confidence: float = 0.35
 
+    # If ROI is invalid (RESULT screen not visible) for this many frames, allow emitting the
+    # same colors again when RESULT appears again (consecutive games can repeat).
+    gap_reset_frames: int = 15
+
 
 def _utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -131,6 +135,7 @@ class ResultDetector:
         self._last_tuple: Optional[Tuple[str, str, str]] = None
         self._stable_count: int = 0
         self._last_emitted: Optional[Tuple[str, str, str]] = None
+        self._gap_count: int = 0
 
     def _load_or_init_config(self) -> DetectorConfig:
         os.makedirs(os.path.dirname(self.config_path) or ".", exist_ok=True)
@@ -173,6 +178,7 @@ class ResultDetector:
                 result_roi=result_roi,
                 stable_frames=int(raw.get("stable_frames", 8)),
                 min_confidence=float(raw.get("min_confidence", 0.35)),
+                gap_reset_frames=int(raw.get("gap_reset_frames", 15)),
             )
         except Exception:
             # fall back to defaults, but don't overwrite user's file automatically
@@ -184,6 +190,7 @@ class ResultDetector:
             "height": cfg.height,
             "stable_frames": cfg.stable_frames,
             "min_confidence": cfg.min_confidence,
+            "gap_reset_frames": cfg.gap_reset_frames,
             "result_roi": (
                 None
                 if cfg.result_roi is None
@@ -203,6 +210,7 @@ class ResultDetector:
             "height": cfg.height,
             "stable_frames": cfg.stable_frames,
             "min_confidence": cfg.min_confidence,
+            "gap_reset_frames": cfg.gap_reset_frames,
             "result_roi": (
                 None
                 if cfg.result_roi is None
@@ -223,6 +231,7 @@ class ResultDetector:
             result_roi=result_roi,
             stable_frames=max(1, int(payload.get("stable_frames", 8))),
             min_confidence=float(payload.get("min_confidence", 0.35)),
+            gap_reset_frames=max(1, int(payload.get("gap_reset_frames", 15))),
         )
         with self._lock:
             self._config = cfg
@@ -331,10 +340,15 @@ class ResultDetector:
                     if any(c == "unknown" for c in tuple_colors) or min_conf < cfg.min_confidence:
                         self._last_tuple = None
                         self._stable_count = 0
+                        self._gap_count += 1
+                        if self._gap_count >= cfg.gap_reset_frames:
+                            self._last_emitted = None
                         # still sleep to respect fps
                         elapsed = time.time() - start
                         time.sleep(max(0.0, interval - elapsed))
                         continue
+                    else:
+                        self._gap_count = 0
 
                     # stability gate
                     emit = False

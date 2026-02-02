@@ -70,11 +70,29 @@
         <span class="muted">Detector:</span>
         <span id="detStatus" class="mono">…</span>
       </div>
+      <div class="row">
+        <span class="muted">Error:</span>
+        <span id="detError" class="mono"></span>
+      </div>
 
       <div class="row">
         <button class="btn primary" id="detStart">Start</button>
         <button class="btn" id="detStop">Stop</button>
       </div>
+
+      <div class="hr"></div>
+
+      <h2 style="margin-bottom: 8px;">History</h2>
+      <table class="table">
+        <thead>
+          <tr>
+            <th style="width: 170px;">Time (UTC)</th>
+            <th>Colors</th>
+            <th style="width: 80px;">Conf</th>
+          </tr>
+        </thead>
+        <tbody id="resultRows"></tbody>
+      </table>
 
       <div class="hr"></div>
 
@@ -144,6 +162,7 @@
       const j = await r.json();
       const status = j.running ? (j.connected ? 'running' : 'running (disconnected)') : 'stopped';
       document.getElementById('detStatus').textContent = status;
+      document.getElementById('detError').textContent = j.last_error ? String(j.last_error) : '';
 
       const ad = j.active_draw ? `${j.active_draw.name}` : '(none)';
       document.getElementById('activeDraw').textContent = ad;
@@ -156,7 +175,36 @@
       document.getElementById('activeDraw').textContent = 'unknown';
       document.getElementById('latestColors').textContent = '';
       document.getElementById('latestTime').textContent = '';
+      document.getElementById('detError').textContent = '';
     }
+
+    try {
+      const r = await fetch('/api/detector/results');
+      const j = await r.json();
+      const items = Array.isArray(j.items) ? j.items : [];
+      const rows = items.slice(-20).reverse();
+      const tbody = document.getElementById('resultRows');
+      tbody.innerHTML = '';
+      for (const it of rows) {
+        const tr = document.createElement('tr');
+        const tdT = document.createElement('td');
+        tdT.className = 'mono';
+        tdT.textContent = it.timestamp || '';
+        const tdC = document.createElement('td');
+        tdC.className = 'mono';
+        tdC.textContent = (it.colors || []).join(', ');
+        const tdConf = document.createElement('td');
+        tdConf.className = 'mono right';
+        tdConf.textContent = (typeof it.confidence === 'number') ? it.confidence.toFixed(2) : '';
+        tr.appendChild(tdT);
+        tr.appendChild(tdC);
+        tr.appendChild(tdConf);
+        tbody.appendChild(tr);
+      }
+    } catch (_) {
+      // ignore
+    }
+
     setTimeout(pollDetector, 1000);
   }
   pollDetector();
@@ -169,4 +217,3 @@
   });
 </script>
 {% endblock %}
-
