@@ -5,7 +5,7 @@ SERVICE_PATH=/etc/systemd/system/grr.service
 
 sudo tee "$SERVICE_PATH" >/dev/null <<'UNIT'
 [Unit]
-Description=Game Result Recorder (docker compose)
+Description=OBS Stream Dashboard (docker compose)
 After=network-online.target docker.service
 Wants=network-online.target docker.service
 

@@ -1,6 +1,6 @@
 # OBS Stream Dashboard (Minimal)
 
-Headless Ubuntu setup to ingest an OBS stream via RTMP and show a live feed in a web dashboard.
+Headless Ubuntu setup to ingest an OBS stream via RTMP and show a near-live feed in a web dashboard.
 
 ## Quick start (VM)
 
@@ -20,15 +20,24 @@ docker compose up --build -d
 
 - `http://<VM_IP>:8000`
 
-4) Configure OBS (on the host machine):
+4) Configure OBS (on the host machine) to publish RTMP:
 
-- Stream type: **Custom**
+- Service: **Custom...**
 - Server: `rtmp://<VM_IP>:1935/live`
 - Stream key: `stream`
 
-The dashboard plays HLS from:
+The dashboard embeds the MediaMTX WebRTC player (low latency):
 
-- `http://<VM_IP>:8080/hls/stream.m3u8`
+- `http://<VM_IP>:8889/live/stream`
+
+## Ports
+
+- `8000/tcp` Dashboard (FastAPI)
+- `1935/tcp` RTMP ingest (OBS -> VM)
+- `8889/tcp` WebRTC HTTP (player + WHEP)
+- `8189/udp` WebRTC ICE/media
+
+If you have a firewall on the VM, make sure these ports are allowed.
 
 ## Optional: start on boot
 
