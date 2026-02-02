@@ -28,11 +28,21 @@ DRAWS_PATH = os.environ.get("DRAWS_PATH", "/data/draws.json")
 draws = DrawStore(path=DRAWS_PATH)
 detector = ResultDetector(rtsp_url=RTSP_URL, fps=DETECTOR_FPS, config_path="/tmp/detector_config.json")
 
-# Apply active draw into the detector on startup.
+def _sync_detector_with_active_draw() -> None:
+    active = draws.active()
+    if active is None:
+        detector.stop()
+        return
+    detector.apply_draw_record(active)
+    if bool(active.get("enabled", True)):
+        detector.start()
+    else:
+        detector.stop()
+
+
+# Apply active draw into the detector on startup and auto-start if enabled.
 try:
-    active_draw = draws.active()
-    if active_draw is not None:
-        detector.apply_draw_record(active_draw)
+    _sync_detector_with_active_draw()
 except Exception:
     pass
 
@@ -177,9 +187,10 @@ async def draws_update(draw_id: str, request: Request):
         return Response(content=b"not found\n", status_code=404, media_type="text/plain")
 
     # If this draw is active, reflect changes into the detector immediately.
-    active = draws.active()
-    if active and active.get("id") == draw_id:
-        detector.apply_draw_record(active)
+    try:
+        _sync_detector_with_active_draw()
+    except Exception:
+        pass
     return {"item": d}
 
 
@@ -189,10 +200,10 @@ def draws_delete(draw_id: str):
         draws.delete(draw_id)
     except KeyError:
         return Response(content=b"not found\n", status_code=404, media_type="text/plain")
-    # refresh detector config from new active draw
-    active = draws.active()
-    if active is not None:
-        detector.apply_draw_record(active)
+    try:
+        _sync_detector_with_active_draw()
+    except Exception:
+        pass
     return {"ok": True}
 
 
@@ -202,7 +213,10 @@ def draws_activate(draw_id: str):
         d = draws.set_active(draw_id)
     except KeyError:
         return Response(content=b"not found\n", status_code=404, media_type="text/plain")
-    detector.apply_draw_record(d)
+    try:
+        _sync_detector_with_active_draw()
+    except Exception:
+        detector.apply_draw_record(d)
     return {"item": d}
 
 
@@ -222,13 +236,23 @@ def detector_stop():
 def detector_status():
     st = detector.status()
     active = draws.active()
-    st["active_draw"] = None if active is None else {"id": active.get("id"), "name": active.get("name")}
+    st["active_draw"] = (
+        None
+        if active is None
+        else {"id": active.get("id"), "name": active.get("name"), "enabled": bool(active.get("enabled", True))}
+    )
     return st
 
 
 @app.get("/api/detector/results")
 def detector_results():
     return {"items": detector.list_results()}
+
+
+@app.post("/api/detector/results/clear")
+def detector_clear_results():
+    detector.clear_results()
+    return {"ok": True}
 
 
 @app.get("/api/detector/snapshot.jpg")

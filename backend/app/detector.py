@@ -273,6 +273,13 @@ class ResultDetector:
         with self._lock:
             return list(self._results)
 
+    def clear_results(self) -> None:
+        with self._lock:
+            self._results.clear()
+            self._last_emitted = None
+            self._last_tuple = None
+            self._stable_count = 0
+
     def start(self) -> None:
         with self._lock:
             if self._thread is not None and self._thread.is_alive():

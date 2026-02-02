@@ -20,6 +20,7 @@
         <th style="width: 180px;">Name</th>
         <th>ROI</th>
         <th style="width: 120px;">Active</th>
+        <th style="width: 110px;">Enabled</th>
         <th style="width: 260px;"></th>
       </tr>
     </thead>
@@ -128,6 +129,9 @@
       const tdActive = document.createElement('td');
       tdActive.textContent = active ? 'yes' : '';
 
+      const tdEnabled = document.createElement('td');
+      tdEnabled.innerHTML = `<input type="checkbox" data-act="toggle" data-id="${d.id}" ${d.enabled ? 'checked' : ''} />`;
+
       const tdActions = document.createElement('td');
       tdActions.className = 'right';
       tdActions.innerHTML = `
@@ -139,6 +143,7 @@
       tr.appendChild(tdName);
       tr.appendChild(tdRoi);
       tr.appendChild(tdActive);
+      tr.appendChild(tdEnabled);
       tr.appendChild(tdActions);
       tbody.appendChild(tr);
     }
@@ -254,6 +259,15 @@
   // table actions
   document.getElementById('drawRows').addEventListener('click', async (e) => {
     const btn = e.target.closest('button[data-act]');
+    const cb = e.target.closest('input[type="checkbox"][data-act="toggle"]');
+    if (cb) {
+      const id = cb.getAttribute('data-id');
+      const enabled = cb.checked;
+      await fetch(`/api/draws/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
+      await load();
+      return;
+    }
+
     if (!btn) return;
     const act = btn.getAttribute('data-act');
     const id = btn.getAttribute('data-id');

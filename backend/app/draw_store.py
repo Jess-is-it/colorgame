@@ -59,6 +59,7 @@ class DrawStore:
                     "height": 1080,
                     "stable_frames": 8,
                     "min_confidence": 0.35,
+                    "enabled": True,
                     "result_roi": None,
                     "created_at": now,
                     "updated_at": now,
@@ -79,6 +80,12 @@ class DrawStore:
             self._state.setdefault("active_id", None)
             self._state.setdefault("draws", [])
 
+            changed = False
+            for d in self._state.get("draws") or []:
+                if "enabled" not in d:
+                    d["enabled"] = True
+                    changed = True
+
             if not self._state["draws"]:
                 now = _now_ts()
                 default = {
@@ -88,12 +95,15 @@ class DrawStore:
                     "height": 1080,
                     "stable_frames": 8,
                     "min_confidence": 0.35,
+                    "enabled": True,
                     "result_roi": None,
                     "created_at": now,
                     "updated_at": now,
                 }
                 self._state["draws"] = [default]
                 self._state["active_id"] = "default"
+                _atomic_write_json(self.path, self._state)
+            elif changed:
                 _atomic_write_json(self.path, self._state)
 
     def _save(self) -> None:
@@ -140,6 +150,7 @@ class DrawStore:
             "height": 1080,
             "stable_frames": 8,
             "min_confidence": 0.35,
+            "enabled": True,
             "result_roi": None,
             "created_at": now,
             "updated_at": now,
@@ -167,6 +178,8 @@ class DrawStore:
                     d["stable_frames"] = max(1, int(patch["stable_frames"]))
                 if "min_confidence" in patch:
                     d["min_confidence"] = float(patch["min_confidence"])
+                if "enabled" in patch:
+                    d["enabled"] = bool(patch["enabled"])
                 if "result_roi" in patch:
                     rr = patch["result_roi"]
                     if rr is None:
@@ -193,4 +206,3 @@ class DrawStore:
             if self._state.get("active_id") == draw_id:
                 self._state["active_id"] = new_draws[0]["id"] if new_draws else None
             self._save()
-

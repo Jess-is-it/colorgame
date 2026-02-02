@@ -1,123 +1,107 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <div class="row between">
-    <div>
-      <h2>Live</h2>
-      <div class="muted">OBS stream + latest detected result.</div>
+<div class="split">
+  <section class="card" style="padding: 12px;">
+    <div class="row between">
+      <div>
+        <h2>Live</h2>
+        <div class="muted">OBS stream</div>
+      </div>
+      <div class="row">
+        <span class="muted">Stream:</span>
+        <span id="streamStatus" class="mono">checking…</span>
+        <span id="streamTracks" class="muted"></span>
+      </div>
+    </div>
+
+    <div class="preview" style="margin-top: 12px;">
+      <iframe
+        id="playerFrame"
+        title="Live feed"
+        src="{{ webrtc_player_url }}"
+        allow="autoplay; fullscreen; picture-in-picture"
+        allowfullscreen
+        referrerpolicy="no-referrer"
+      ></iframe>
+    </div>
+    <div class="row" style="margin-top: 10px;">
+      <a class="muted" href="{{ webrtc_player_url }}" target="_blank" rel="noopener">Open player in new tab</a>
+    </div>
+  </section>
+
+  <aside class="card" style="padding: 12px;">
+    <h2 style="margin-bottom: 8px;">Latest Win</h2>
+
+    <div class="row">
+      <span class="muted">Active draw:</span>
+      <span id="activeDraw" class="mono">…</span>
+    </div>
+
+    <div class="row">
+      <span class="muted">Colors:</span>
+      <span id="latestColors" class="mono"></span>
+    </div>
+
+    <div class="row">
+      <span class="muted">Time:</span>
+      <span id="latestTime" class="mono"></span>
+    </div>
+
+    <div class="row">
+      <span class="muted">Detector:</span>
+      <span id="detStatus" class="mono">…</span>
     </div>
     <div class="row">
-      <span class="muted">Stream:</span>
-      <span id="streamStatus" class="mono">checking…</span>
-      <span id="streamTracks" class="muted"></span>
-    </div>
-  </div>
-
-  <div class="split" style="margin-top: 12px;">
-    <div class="card" style="padding: 12px;">
-      <div class="preview">
-        <iframe
-          id="playerFrame"
-          title="Live feed"
-          src="{{ webrtc_player_url }}"
-          allow="autoplay; fullscreen; picture-in-picture"
-          allowfullscreen
-          referrerpolicy="no-referrer"
-        ></iframe>
-      </div>
-      <div class="row" style="margin-top: 10px;">
-        <a class="muted" href="{{ webrtc_player_url }}" target="_blank" rel="noopener">Open player in new tab</a>
-      </div>
-
-      <details style="margin-top: 10px;">
-        <summary>OBS Settings (Recommended: WHIP)</summary>
-        <div style="margin-top: 8px;">
-          <div class="row">
-            <span class="muted">Service:</span>
-            <span class="mono">WHIP</span>
-          </div>
-          <div class="row">
-            <span class="muted">Server:</span>
-            <span class="mono">{{ whip_url }}</span>
-          </div>
-          <div class="row">
-            <span class="muted">Stream key:</span>
-            <span class="mono">(empty)</span>
-          </div>
-        </div>
-      </details>
+      <span class="muted">Error:</span>
+      <span id="detError" class="mono"></span>
     </div>
 
-    <aside class="card" style="padding: 12px;">
-      <h2 style="margin-bottom: 8px;">Latest Win</h2>
+    <div class="row">
+      <a class="muted" href="/draw">Manage Draws (enable/disable)</a>
+    </div>
 
-      <div class="row">
-        <span class="muted">Active draw:</span>
-        <span id="activeDraw" class="mono">…</span>
-      </div>
+    <div class="hr"></div>
 
-      <div class="row">
-        <span class="muted">Colors:</span>
-        <span id="latestColors" class="mono"></span>
-      </div>
+    <div class="row between">
+      <h2 style="margin: 0;">History</h2>
+      <button class="btn" id="clearHistory">Clear</button>
+    </div>
 
-      <div class="row">
-        <span class="muted">Time:</span>
-        <span id="latestTime" class="mono"></span>
-      </div>
-
-      <div class="row">
-        <span class="muted">Detector:</span>
-        <span id="detStatus" class="mono">…</span>
-      </div>
-      <div class="row">
-        <span class="muted">Error:</span>
-        <span id="detError" class="mono"></span>
-      </div>
-
-      <div class="row">
-        <button class="btn primary" id="detStart">Start</button>
-        <button class="btn" id="detStop">Stop</button>
-      </div>
-
-      <div class="hr"></div>
-
-      <h2 style="margin-bottom: 8px;">History</h2>
-      <table class="table">
-        <thead>
-          <tr>
-            <th style="width: 170px;">Time (UTC)</th>
-            <th>Colors</th>
-            <th style="width: 80px;">Conf</th>
-          </tr>
-        </thead>
-        <tbody id="resultRows"></tbody>
-      </table>
-
-      <div class="hr"></div>
-
-      <details>
-        <summary>Connection Debug</summary>
-        <div style="margin-top: 8px;">
-          <div class="row">
-            <span class="muted">WebRTC sessions:</span>
-            <span id="webrtcSessions" class="mono">…</span>
-          </div>
-          <div class="row">
-            <span class="muted">Latest ICE:</span>
-            <span id="webrtcIce" class="mono"></span>
-          </div>
-        </div>
-      </details>
-
-      <div class="row" style="margin-top: 10px;">
-        <a class="muted" href="/draw">Go to Draw page</a>
-      </div>
-    </aside>
-  </div>
-</section>
+    <table class="table" style="margin-top: 8px;">
+      <thead>
+        <tr>
+          <th style="width: 150px;">Time (PH)</th>
+          <th>Colors</th>
+          <th style="width: 70px;">Conf</th>
+        </tr>
+      </thead>
+      <tbody id="resultRows"></tbody>
+    </table>
+  </aside>
+</div>
 
 <script>
+  const phFmt = new Intl.DateTimeFormat('en-PH', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
+
+  function fmtPh(ts) {
+    try {
+      const d = new Date(ts);
+      if (isNaN(d.getTime())) return '';
+      return phFmt.format(d);
+    } catch (_) {
+      return '';
+    }
+  }
+
   async function pollStream() {
     try {
       const r = await fetch('/api/stream/status');
@@ -169,7 +153,7 @@
 
       const lr = j.last_result;
       document.getElementById('latestColors').textContent = lr ? lr.colors.join(', ') : '';
-      document.getElementById('latestTime').textContent = lr ? lr.timestamp : '';
+      document.getElementById('latestTime').textContent = lr ? fmtPh(lr.timestamp) : '';
     } catch (_) {
       document.getElementById('detStatus').textContent = 'unknown';
       document.getElementById('activeDraw').textContent = 'unknown';
@@ -189,7 +173,7 @@
         const tr = document.createElement('tr');
         const tdT = document.createElement('td');
         tdT.className = 'mono';
-        tdT.textContent = it.timestamp || '';
+        tdT.textContent = it.timestamp ? fmtPh(it.timestamp) : '';
         const tdC = document.createElement('td');
         tdC.className = 'mono';
         tdC.textContent = (it.colors || []).join(', ');
@@ -209,11 +193,8 @@
   }
   pollDetector();
 
-  document.getElementById('detStart').addEventListener('click', async () => {
-    await fetch('/api/detector/start', { method: 'POST' });
-  });
-  document.getElementById('detStop').addEventListener('click', async () => {
-    await fetch('/api/detector/stop', { method: 'POST' });
+  document.getElementById('clearHistory').addEventListener('click', async () => {
+    await fetch('/api/detector/results/clear', { method: 'POST' });
   });
 </script>
 {% endblock %}
