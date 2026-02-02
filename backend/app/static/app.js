@@ -59,8 +59,6 @@ function renderResults(rows) {
     .join("");
 }
 
-let previewLastTs = 0;
-
 async function refreshStatusAndResults() {
   const status = await apiJson("/api/status");
 
@@ -82,10 +80,9 @@ async function refreshStatusAndResults() {
     const msg = $("previewMsg");
     if (img) {
       if (pub) {
-        const now = Date.now();
-        if (now - previewLastTs > 1500) {
-          img.src = `/api/preview.jpg?t=${now}`;
-          previewLastTs = now;
+        // Continuous MJPEG stream (30 FPS server-side).
+        if (!img.src || !img.src.includes("/api/preview.mjpeg")) {
+          img.src = `/api/preview.mjpeg?t=${Date.now()}`;
         }
         if (msg) msg.textContent = "";
       } else {
@@ -132,7 +129,7 @@ function hookDashboard() {
   const prevImg = $("previewImg");
   if (prevImg) {
     prevImg.addEventListener("error", () => {
-      setText("previewMsg", "Preview error (backend couldn't grab a frame yet).");
+      setText("previewMsg", "Preview error (stream decode not ready yet).");
     });
   }
 

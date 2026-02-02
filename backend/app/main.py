@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app import crud, schemas
 from app.db import SessionLocal
 from app.services import obs_integration
+from app.services import mjpeg as mjpeg_service
 from app.services import preview as preview_service
 from app.services import rtmp_status as rtmp_status_service
 from app.services.processor import processor_manager
@@ -274,6 +275,14 @@ def api_preview_jpg(db: Session = Depends(get_db)):
     if jpeg is None:
         raise HTTPException(status_code=503, detail=meta.get("last_error") or "No preview frame yet")
     return Response(content=jpeg, media_type="image/jpeg")
+
+
+@app.get("/api/preview.mjpeg")
+def api_preview_mjpeg(db: Session = Depends(get_db)):
+    # Always stream at 30 FPS for the dashboard. This is CPU/bandwidth heavy.
+    s = crud.get_app_settings(db)
+    gen = mjpeg_service.iter_mjpeg_multipart(stream_url=s.backend_stream_url, fps=30, width=640, height=360, jpeg_quality=6)
+    return StreamingResponse(gen, media_type="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.get("/api/settings", response_model=schemas.AppSettingsOut)
