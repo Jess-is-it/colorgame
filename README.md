@@ -22,6 +22,12 @@ docker compose up --build
 
 - `http://<VM_IP>:8000`
 
+3b) (Optional) Install a systemd service so the stack starts on boot:
+
+```bash
+./scripts/install_systemd_service.sh
+```
+
 4) Configure OBS (on the host machine):
 
 - Stream type: **Custom**
