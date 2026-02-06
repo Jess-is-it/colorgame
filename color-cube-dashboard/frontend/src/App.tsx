@@ -1,13 +1,12 @@
-import { RouterProvider } from "react-router";
-import router from "./routes/Router";
-import './css/globals.css'
+import ColorCubeDashboard from './views/dashboards/ColorCubeDashboard';
 
 function App() {
-
   return (
-    <>
-        <RouterProvider router={router} />
-    </>
+    <div className="min-h-screen bg-lightgray dark:bg-dark">
+      <div className="max-w-7xl mx-auto p-6">
+        <ColorCubeDashboard />
+      </div>
+    </div>
   );
 }
 
