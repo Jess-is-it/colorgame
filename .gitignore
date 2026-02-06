@@ -3,6 +3,7 @@
 .ssh/
 .sudo_as_admin_successful
 .bash_logout
+.bash_history
 .bashrc
 .profile
 
