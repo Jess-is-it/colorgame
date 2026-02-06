@@ -67,6 +67,25 @@ VITE_API_BASE_URL=http://YOUR_SERVER_IP:8000 npm run dev -- --host 0.0.0.0 --por
 Open in your client browser:
 - `http://YOUR_SERVER_IP:5173`
 
+## One-command dev run (recommended)
+
+From `color-cube-dashboard/`:
+
+```bash
+./scripts/bootstrap.sh
+./scripts/run.sh
+```
+
+Stop:
+```bash
+./scripts/stop.sh
+```
+
+Status:
+```bash
+./scripts/status.sh
+```
+
 ### Frontend config
 
 - Env var: `VITE_API_BASE_URL`

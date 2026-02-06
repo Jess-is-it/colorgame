@@ -25,6 +25,7 @@ color-cube-dashboard/backend/.venv/
 color-cube-dashboard/frontend/node_modules/
 color-cube-dashboard/frontend/dist/
 color-cube-dashboard/frontend/.vite/
+color-cube-dashboard/.run/
 
 # App runtime
 data/
