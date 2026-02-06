@@ -18,6 +18,7 @@ function fmtTs(ts?: number | null): string {
 const ColorCubeDashboard = () => {
   const [status, setStatus] = useState<CameraStatusResponse | null>(null);
   const [apiError, setApiError] = useState<string>('');
+  const [streamError, setStreamError] = useState<boolean>(false);
   const [refreshKey, setRefreshKey] = useState<number>(() => Date.now());
 
   const online = !!status?.online && !apiError;
@@ -67,7 +68,10 @@ const ColorCubeDashboard = () => {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setRefreshKey(Date.now())}
+            onClick={() => {
+              setStreamError(false);
+              setRefreshKey(Date.now());
+            }}
             title="Reload the stream"
           >
             Refresh stream
@@ -79,14 +83,17 @@ const ColorCubeDashboard = () => {
             src={imgSrc}
             alt="Live camera stream"
             className="w-full h-auto block"
-            onError={() => setRefreshKey(Date.now())}
+            onLoad={() => setStreamError(false)}
+            onError={() => setStreamError(true)}
           />
         </div>
 
-        {!online ? (
+        {!online || streamError ? (
           <div className="px-5 py-4 text-sm text-darklink dark:text-darklink">
             <span className="font-medium text-dark dark:text-white">Error:</span>{' '}
-            <span className="font-mono">{apiError || status?.error || '(none)'}</span>
+            <span className="font-mono">
+              {streamError ? 'stream failed to load (check VITE_API_BASE_URL)' : (apiError || status?.error || '(none)')}
+            </span>
           </div>
         ) : (
           <div className="px-5 py-3 text-xs text-darklink dark:text-darklink">

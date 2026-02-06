@@ -7,9 +7,20 @@ export type CameraStatusResponse = {
   last_frame_time?: number | null;
 };
 
-const DEFAULT_BASE = 'http://localhost:8000';
+function defaultBaseUrl(): string {
+  // If the dashboard is opened from another machine, "localhost" is the client machine.
+  // Default to the same host serving the frontend, but with backend port 8000.
+  try {
+    const host = (typeof window !== 'undefined' && window.location && window.location.hostname)
+      ? window.location.hostname
+      : 'localhost';
+    return `http://${host}:8000`;
+  } catch (_) {
+    return 'http://localhost:8000';
+  }
+}
 
-export const API_BASE_URL: string = (import.meta as any).env?.VITE_API_BASE_URL || DEFAULT_BASE;
+export const API_BASE_URL: string = (import.meta as any).env?.VITE_API_BASE_URL || defaultBaseUrl();
 
 function joinUrl(base: string, path: string): string {
   const b = String(base || '').replace(/\/+$/, '');
@@ -37,4 +48,3 @@ export function getHealth(): Promise<HealthResponse> {
 export function getCameraStatus(): Promise<CameraStatusResponse> {
   return getJson<CameraStatusResponse>('api/camera/status');
 }
-

@@ -7,7 +7,9 @@ mkdir -p "$RUN_DIR"
 
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
-API_BASE_URL="${VITE_API_BASE_URL:-http://localhost:${BACKEND_PORT}}"
+SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+if [[ -z "${SERVER_IP}" ]]; then SERVER_IP="localhost"; fi
+API_BASE_URL="${VITE_API_BASE_URL:-http://${SERVER_IP}:${BACKEND_PORT}}"
 
 if [[ ! -x "$ROOT_DIR/backend/.venv/bin/uvicorn" ]]; then
   echo "[run] backend venv not found. Run: $ROOT_DIR/scripts/bootstrap.sh"
