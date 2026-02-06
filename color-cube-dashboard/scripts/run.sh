@@ -58,5 +58,12 @@ for _ in {1..40}; do
   sleep 0.1
 done
 
+for _ in {1..60}; do
+  if curl -fsS "http://127.0.0.1:${FRONTEND_PORT}/" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 0.1
+done
+
 echo "[run] backend:  http://0.0.0.0:${BACKEND_PORT} (health: /health)"
 echo "[run] frontend: http://0.0.0.0:${FRONTEND_PORT}"

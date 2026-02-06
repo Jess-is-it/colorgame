@@ -5,7 +5,12 @@ import { cn } from 'src/lib/utils';
 
 const Card = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
   ({ className, ...props }, ref) => {
-    const { isCardShadow, isBorderRadius } = React.useContext(CustomizerContext);
+    // The upstream template expects CustomizerContextProvider at the app root.
+    // For this MVP we intentionally stripped most template providers, so we
+    // fall back to sane defaults when the context isn't mounted.
+    const ctx = React.useContext(CustomizerContext);
+    const isCardShadow: boolean = typeof ctx?.isCardShadow === 'boolean' ? ctx.isCardShadow : true;
+    const isBorderRadius: number = Number.isFinite(ctx?.isBorderRadius) ? Number(ctx.isBorderRadius) : 16;
     return (
       <div
         ref={ref}
