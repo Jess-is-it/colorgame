@@ -38,7 +38,8 @@ else
   (
     cd "$ROOT_DIR/frontend"
     export VITE_API_BASE_URL="$API_BASE_URL"
-    exec npm run dev -- --host 0.0.0.0 --port "$FRONTEND_PORT"
+    # Run Vite directly so we can reliably manage the process by PID.
+    exec ./node_modules/.bin/vite --host 0.0.0.0 --port "$FRONTEND_PORT"
   ) >"$RUN_DIR/frontend.log" 2>&1 &
   echo $! >"$RUN_DIR/frontend.pid"
 fi
