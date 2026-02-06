@@ -45,13 +45,17 @@ stop_one backend
 kill_listeners() {
   local port="$1"
   local pids
-  pids="$(ss -lntp 2>/dev/null | awk -v p=":$port" '$4 ~ p {print $NF}' | sed -nE 's/.*pid=([0-9]+).*/\\1/p' | sort -u | tr '\n' ' ')"
+  pids="$(ss -lntp 2>/dev/null | awk -v p=":$port" '$4 ~ p {print $NF}' | sed -nE 's/.*pid=([0-9]+).*/\1/p' | sort -u | tr '\n' ' ')"
   if [[ -z "$pids" ]]; then
     return 0
   fi
   echo "[stop] killing listeners on :$port (pids: $pids)"
   for pid in $pids; do
     kill -TERM "$pid" 2>/dev/null || true
+  done
+  sleep 0.2
+  for pid in $pids; do
+    kill -KILL "$pid" 2>/dev/null || true
   done
 }
 
