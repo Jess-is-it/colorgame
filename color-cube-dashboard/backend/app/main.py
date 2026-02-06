@@ -12,7 +12,6 @@ from .config import load_config
 
 cfg = load_config()
 camera = CameraManager(cfg)
-camera.start()
 
 app = FastAPI(title="Color Cube Dashboard API")
 
@@ -24,6 +23,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.on_event("startup")
+def _startup() -> None:
+    camera.start()
+
+
+@app.on_event("shutdown")
+def _shutdown() -> None:
+    camera.stop()
 
 
 @app.get("/health")
@@ -44,5 +52,4 @@ def stream():
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={"Cache-Control": "no-store"},
     )
-
 
