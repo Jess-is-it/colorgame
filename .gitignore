@@ -25,6 +25,8 @@ color-cube-dashboard/backend/.venv/
 color-cube-dashboard/frontend/node_modules/
 color-cube-dashboard/frontend/dist/
 color-cube-dashboard/frontend/.vite/
+color-cube-dashboard/frontend/vite.config.ts.timestamp-*.mjs
+color-cube-dashboard/frontend/*.timestamp-*.mjs
 color-cube-dashboard/.run/
 
 # App runtime

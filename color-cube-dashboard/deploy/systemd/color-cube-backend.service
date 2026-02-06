@@ -1,0 +1,18 @@
+[Unit]
+Description=Color Cube Dashboard Backend (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=colorgame
+WorkingDirectory=/home/colorgame/color-cube-dashboard/backend
+Environment=HOME=/home/colorgame
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/colorgame/color-cube-dashboard/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

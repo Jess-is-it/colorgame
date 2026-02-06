@@ -1,0 +1,19 @@
+[Unit]
+Description=Color Cube Dashboard Frontend (Vite Dev Server)
+After=network-online.target color-cube-backend.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=colorgame
+WorkingDirectory=/home/colorgame/color-cube-dashboard/frontend
+Environment=HOME=/home/colorgame
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=NODE_ENV=production
+# VITE_API_BASE_URL is optional; frontend defaults to http://<frontend-host>:8000.
+ExecStart=/home/colorgame/color-cube-dashboard/frontend/node_modules/.bin/vite --host 0.0.0.0 --port 5173 --strictPort
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
