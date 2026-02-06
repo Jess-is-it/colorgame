@@ -1,0 +1,34 @@
+:root {
+  --color-primary: #5d87ff;
+  --color-secondary: #49beff;
+}
+
+[data-color-theme='BLUE_THEME'] {
+  --color-primary: #5d87ff;
+  --color-secondary: #49beff;
+}
+
+[data-color-theme='AQUA_THEME'] {
+  --color-primary: #0074ba;
+  --color-secondary: #47d7bc;
+}
+
+[data-color-theme='PURPLE_THEME'] {
+  --color-primary: #763ebd;
+  --color-secondary: #49beff;
+}
+
+[data-color-theme='GREEN_THEME'] {
+  --color-primary: #0a7ea4;
+  --color-secondary: #ccda4e;
+}
+
+[data-color-theme='CYAN_THEME'] {
+  --color-primary: #01c0c8;
+  --color-secondary: #fb9678;
+}
+
+[data-color-theme='CUSTOM_THEME'] {
+  --color-primary: #5d87ff;
+  --color-secondary: #49beff;
+}

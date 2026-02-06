@@ -20,6 +20,12 @@ __pycache__/
 .venv/
 venv/
 
+# Project-local virtualenvs / deps
+color-cube-dashboard/backend/.venv/
+color-cube-dashboard/frontend/node_modules/
+color-cube-dashboard/frontend/dist/
+color-cube-dashboard/frontend/.vite/
+
 # App runtime
 data/
 hls/

@@ -1,0 +1,12 @@
+{
+  "camera": {
+    "type": "device",
+    "device_index": 0,
+    "rtsp_url": ""
+  },
+  "stream": {
+    "jpeg_quality": 80,
+    "max_fps": 15
+  }
+}
+
