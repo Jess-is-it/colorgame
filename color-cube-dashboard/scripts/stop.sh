@@ -20,7 +20,9 @@ stop_one() {
   fi
   if kill -0 "$pid" 2>/dev/null; then
     echo "[stop] stopping $name (pid $pid)"
-    kill "$pid" || true
+    # Stop children first (npm spawns a child node process).
+    pkill -TERM -P "$pid" 2>/dev/null || true
+    kill -TERM "$pid" 2>/dev/null || true
     # give it a moment
     for _ in {1..20}; do
       if kill -0 "$pid" 2>/dev/null; then
@@ -29,7 +31,8 @@ stop_one() {
         break
       fi
     done
-    kill -9 "$pid" 2>/dev/null || true
+    pkill -KILL -P "$pid" 2>/dev/null || true
+    kill -KILL "$pid" 2>/dev/null || true
   else
     echo "[stop] $name not running (stale pid $pid)"
   fi
@@ -38,4 +41,3 @@ stop_one() {
 
 stop_one frontend
 stop_one backend
-
