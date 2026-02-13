@@ -56,12 +56,20 @@ async def store_upload_stream(videos_dir: Path, original_name: str, upload_file)
     out_path = videos_dir / stored_name
 
     # UploadFile.read() is async; write in chunks to support large videos.
-    with out_path.open("wb") as f:
-        while True:
-            chunk = await upload_file.read(1024 * 1024)
-            if not chunk:
-                break
-            f.write(chunk)
+    try:
+        with out_path.open("wb") as f:
+            while True:
+                chunk = await upload_file.read(1024 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+    except Exception:
+        # Best-effort cleanup for partially written uploads.
+        try:
+            out_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
     return stored_name, out_path
 

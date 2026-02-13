@@ -10,6 +10,8 @@ WorkingDirectory=/home/colorgame/color-cube-dashboard/backend
 Environment=HOME=/home/colorgame
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=PYTHONUNBUFFERED=1
+# Optional: set this to move storage (videos/faces/sqlite) to a larger mount.
+# Environment=COLOR_CUBE_DATA_DIR=/home/colorgame/color-cube-data
 ExecStart=/home/colorgame/color-cube-dashboard/backend/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=2

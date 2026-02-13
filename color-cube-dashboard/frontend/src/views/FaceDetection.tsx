@@ -16,7 +16,7 @@ import {
   listVideos,
   startDetection,
   updateSettings,
-  uploadVideo,
+  uploadVideoWithProgress,
   videoFileUrl,
   type Detection,
   type PersonRow,
@@ -63,6 +63,8 @@ export default function FaceDetection() {
   const [uploading, setUploading] = useState<boolean>(false);
   const [videoUploadErr, setVideoUploadErr] = useState<string>('');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadPct, setUploadPct] = useState<number>(0);
+  const [uploadBytes, setUploadBytes] = useState<{ loaded: number; total?: number }>({ loaded: 0 });
 
   const [settings, setSettings] = useState<Settings | null>(null);
   const [settingsErr, setSettingsErr] = useState<string>('');
@@ -201,8 +203,13 @@ export default function FaceDetection() {
     if (!uploadFile) return;
     setUploading(true);
     setVideoUploadErr('');
+    setUploadPct(0);
+    setUploadBytes({ loaded: 0, total: uploadFile.size });
     try {
-      const v = await uploadVideo(uploadFile);
+      const v = await uploadVideoWithProgress(uploadFile, (p) => {
+        setUploadBytes({ loaded: p.loaded, total: p.total });
+        if (typeof p.pct === 'number' && isFinite(p.pct)) setUploadPct(Math.max(0, Math.min(100, p.pct)));
+      });
       const next = await listVideos();
       setVideos(next);
       setSelectedVideoId(v.id);
@@ -430,6 +437,22 @@ export default function FaceDetection() {
                 {uploading ? 'Uploading...' : 'Add Video'}
               </Button>
             </div>
+
+            {uploading ? (
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-xs text-darklink dark:text-darklink">
+                  <div className="font-mono">
+                    {uploadBytes.total
+                      ? `${Math.round(uploadBytes.loaded / 1024 / 1024)} / ${Math.round(uploadBytes.total / 1024 / 1024)} MB`
+                      : `${Math.round(uploadBytes.loaded / 1024 / 1024)} MB`}
+                  </div>
+                  <div className="font-mono">{Math.round(uploadPct)}%</div>
+                </div>
+                <div className="mt-2 h-2 bg-lightgray dark:bg-darkgray rounded">
+                  <div className="h-2 bg-primary rounded" style={{ width: `${Math.round(uploadPct)}%` }} />
+                </div>
+              </div>
+            ) : null}
 
             {videoUploadErr ? <div className="mt-2 text-xs text-error font-mono">{videoUploadErr}</div> : null}
 

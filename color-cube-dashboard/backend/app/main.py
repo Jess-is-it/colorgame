@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
 from . import db as dbmod
 from .config import ensure_dirs, get_paths
@@ -95,7 +95,15 @@ async def upload_video(file: UploadFile = File(...)) -> dict[str, Any]:
     if not file.filename:
         raise HTTPException(status_code=400, detail="missing filename")
 
-    stored_name, out_path = await store_upload_stream(paths.videos_dir, file.filename, file)
+    try:
+        stored_name, out_path = await store_upload_stream(paths.videos_dir, file.filename, file)
+    except OSError as e:
+        if getattr(e, "errno", None) == 28:
+            raise HTTPException(
+                status_code=507,
+                detail="No space left on device while uploading. Free disk space or move storage to a larger mount.",
+            )
+        raise
     if out_path.stat().st_size <= 0:
         raise HTTPException(status_code=400, detail="empty file")
     meta = probe_video(out_path)
@@ -129,7 +137,19 @@ async def replace_video(video_id: int, file: UploadFile = File(...)) -> dict[str
         raise HTTPException(status_code=404, detail="video not found")
 
     # Store a new file and swap the DB record; delete old file best-effort.
-    stored_name, out_path = await store_upload_stream(paths.videos_dir, file.filename or existing["original_name"], file)
+    try:
+        stored_name, out_path = await store_upload_stream(
+            paths.videos_dir,
+            file.filename or existing["original_name"],
+            file,
+        )
+    except OSError as e:
+        if getattr(e, "errno", None) == 28:
+            raise HTTPException(
+                status_code=507,
+                detail="No space left on device while uploading. Free disk space or move storage to a larger mount.",
+            )
+        raise
     if out_path.stat().st_size <= 0:
         raise HTTPException(status_code=400, detail="empty file")
     meta = probe_video(out_path)
@@ -190,6 +210,31 @@ def get_video_file(video_id: int, request: Request):
         raise HTTPException(status_code=404, detail="file missing on disk")
 
     return range_file_response(path, request)
+
+
+@app.head("/api/videos/{video_id}/file")
+def head_video_file(video_id: int, request: Request):
+    # Some browsers probe with HEAD before GET; support it to prevent "failed to fetch".
+    row = conn.execute("SELECT stored_name FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="video not found")
+
+    path = paths.videos_dir / row["stored_name"]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="file missing on disk")
+
+    size = path.stat().st_size
+    from .videos import guess_mime
+
+    return Response(
+        status_code=200,
+        media_type=guess_mime(path),
+        headers={
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(size),
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @app.post("/api/videos/{video_id}/detect")

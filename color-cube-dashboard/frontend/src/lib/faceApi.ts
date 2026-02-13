@@ -118,6 +118,55 @@ export async function uploadVideo(file: File): Promise<VideoRow> {
   return json.video;
 }
 
+export function uploadVideoWithProgress(
+  file: File,
+  onProgress: (p: { loaded: number; total?: number; pct?: number }) => void,
+): Promise<VideoRow> {
+  const url = joinUrl(API_BASE_URL, 'api/videos');
+  const fd = new FormData();
+  fd.append('file', file);
+
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.responseType = 'text';
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        const pct = e.total > 0 ? (e.loaded / e.total) * 100 : undefined;
+        onProgress({ loaded: e.loaded, total: e.total, pct });
+      } else {
+        onProgress({ loaded: e.loaded });
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('network error'));
+    xhr.onabort = () => reject(new Error('upload aborted'));
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const json = JSON.parse(xhr.responseText || '{}') as { video: VideoRow };
+          resolve(json.video);
+        } catch (e) {
+          reject(new Error('invalid server response'));
+        }
+        return;
+      }
+
+      // Try to surface FastAPI {"detail": "..."} errors.
+      try {
+        const j = JSON.parse(xhr.responseText || '{}') as any;
+        const msg = j?.detail ? String(j.detail) : `HTTP ${xhr.status}`;
+        reject(new Error(msg));
+      } catch (_) {
+        reject(new Error(`HTTP ${xhr.status}`));
+      }
+    };
+
+    xhr.send(fd);
+  });
+}
+
 export async function replaceVideo(videoId: number, file: File): Promise<void> {
   const url = joinUrl(API_BASE_URL, `api/videos/${videoId}`);
   const fd = new FormData();
@@ -164,4 +213,3 @@ export async function listPersonImages(personId: number): Promise<{ id: number; 
   );
   return r.images || [];
 }
-

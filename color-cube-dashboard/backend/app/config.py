@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,7 +17,9 @@ class AppPaths:
 def get_paths() -> AppPaths:
     # backend/ is the working directory in systemd + README commands.
     root = Path(__file__).resolve().parents[1]
-    data_dir = root / "data"
+    # Allow storage to be placed on a larger disk/mount (e.g. VirtualBox shared folder).
+    data_root = os.environ.get("COLOR_CUBE_DATA_DIR", "").strip()
+    data_dir = Path(data_root).expanduser().resolve() if data_root else (root / "data")
     videos_dir = data_dir / "videos"
     faces_dir = data_dir / "faces"
     db_path = data_dir / "app.sqlite3"
