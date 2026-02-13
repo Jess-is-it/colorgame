@@ -224,3 +224,9 @@ export async function listPersonImages(personId: number): Promise<{ id: number; 
   );
   return r.images || [];
 }
+
+export async function clearFaces(): Promise<void> {
+  const url = joinUrl(API_BASE_URL, 'api/admin/clear-faces');
+  const r = await fetch(url, { method: 'POST', headers: { Accept: 'application/json' } });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+}

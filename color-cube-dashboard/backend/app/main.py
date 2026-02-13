@@ -418,3 +418,27 @@ def get_face_image_file(image_id: int):
     if not p.exists():
         raise HTTPException(status_code=404, detail="file missing on disk")
     return FileResponse(str(p), headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/admin/clear-faces")
+def clear_faces() -> dict[str, Any]:
+    """
+    Clears captured persons + images + detections (keeps uploaded videos).
+    """
+    import shutil
+
+    # Delete files on disk first.
+    try:
+        if paths.faces_dir.exists():
+            shutil.rmtree(paths.faces_dir)
+    except Exception:
+        # Best-effort; DB cleanup still proceeds.
+        pass
+    ensure_dirs()
+
+    with dbmod.tx(conn) as cur:
+        cur.execute("DELETE FROM detections")
+        cur.execute("DELETE FROM face_images")
+        cur.execute("DELETE FROM persons")
+
+    return {"ok": True}

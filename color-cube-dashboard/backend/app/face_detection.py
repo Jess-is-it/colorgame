@@ -15,7 +15,7 @@ from face_detect.detect_imgs import get_face_boundingbox  # type: ignore
 
 from .codenames import pick_codename
 from .db import tx
-from .similarity import ahash64_bgr, hamming_distance
+from .similarity import phash64_bgr, hamming_distance
 from .timeutil import now_utc_iso
 
 
@@ -81,6 +81,23 @@ def _clamp_box(x1: int, y1: int, x2: int, y2: int, w: int, h: int) -> tuple[int,
     return x1, y1, x2, y2
 
 
+def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    ix1 = max(ax1, bx1)
+    iy1 = max(ay1, by1)
+    ix2 = min(ax2, bx2)
+    iy2 = min(ay2, by2)
+    iw = max(0, ix2 - ix1)
+    ih = max(0, iy2 - iy1)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    a_area = max(1, (ax2 - ax1) * (ay2 - ay1))
+    b_area = max(1, (bx2 - bx1) * (by2 - by1))
+    return float(inter) / float(a_area + b_area - inter)
+
+
 def start_detection_job(
     *,
     conn,
@@ -132,9 +149,26 @@ def _run_detection(*, conn, registry: JobRegistry, job_id: str, video_id: int, v
             fps = 30.0
         step = max(1, int(round(fps / max(sample_fps, 0.25))))
 
+        # In this project, the "main" faces are usually the largest ones on screen.
+        # This avoids creating persons for tiny avatars/icons in the UI.
+        max_faces_per_frame = 2
+        min_face_px = 80  # ignore very small faces
+
         # Clear previous detections for this video (keep people + images).
         with tx(conn) as cur:
             cur.execute("DELETE FROM detections WHERE video_id = ?", (video_id,))
+
+        # Cache people once per job; update in memory when new persons are created.
+        with tx(conn) as cur:
+            people_rows = cur.execute("SELECT id, codename, signature FROM persons").fetchall()
+        people = [{"id": int(r["id"]), "codename": r["codename"], "signature": r["signature"]} for r in people_rows]
+        used_names = {p["codename"] for p in people}
+
+        # Keep last capture by *video time* so interval makes sense for offline videos.
+        last_capture_t: dict[int, float] = {}
+
+        # Simple per-job tracking to keep the same person across frames.
+        tracks: dict[int, dict[str, Any]] = {}  # person_id -> {box,last_frame,last_t}
 
         frame_idx = 0
         processed = 0
@@ -158,35 +192,62 @@ def _run_detection(*, conn, registry: JobRegistry, job_id: str, video_id: int, v
             h, w = frame.shape[:2]
             now_iso = now_utc_iso()
 
-            # Preload existing persons once per sampled frame to match quickly.
-            with tx(conn) as cur:
-                people = cur.execute("SELECT id, codename, signature, last_capture_at FROM persons").fetchall()
-            used_names = {p["codename"] for p in people}
-
+            # Convert detections into sortable list; keep biggest faces only.
+            dets: list[dict[str, Any]] = []
             for i in range(int(len(boxes))):
                 b = boxes[i].data.cpu().numpy().tolist()
                 sc = float(scores[i].data.cpu().numpy().item()) if len(scores) > i else None
                 x1, y1, x2, y2 = map(int, b)
                 x1, y1, x2, y2 = _clamp_box(x1, y1, x2, y2, w, h)
-                crop = frame[y1:y2, x1:x2].copy()
-                sig = ahash64_bgr(crop)
+                bw = x2 - x1
+                bh = y2 - y1
+                if bw < min_face_px or bh < min_face_px:
+                    continue
+                dets.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2, "score": sc, "area": bw * bh})
+            dets.sort(key=lambda d: d["area"], reverse=True)
+            dets = dets[:max_faces_per_frame]
 
-                # Match to existing person by signature.
-                best = None
+            # Try to match detections to existing tracks first (keeps stable IDs across frames).
+            unmatched: list[dict[str, Any]] = []
+            used_track_ids: set[int] = set()
+            for d in dets:
+                dbox = (d["x1"], d["y1"], d["x2"], d["y2"])
+                best_pid: Optional[int] = None
+                best_iou = 0.0
+                for pid, tr in tracks.items():
+                    if pid in used_track_ids:
+                        continue
+                    iou = _iou(dbox, tr["box"])
+                    if iou > best_iou:
+                        best_iou = iou
+                        best_pid = pid
+                if best_pid is not None and best_iou >= 0.20:
+                    d["person_id"] = best_pid
+                    used_track_ids.add(best_pid)
+                else:
+                    unmatched.append(d)
+
+            for d in unmatched:
+                x1, y1, x2, y2 = d["x1"], d["y1"], d["x2"], d["y2"]
+                crop = frame[y1:y2, x1:x2].copy()
+                sig = phash64_bgr(crop)
+
+                # Match to existing person by signature (fallback).
+                best_id: Optional[int] = None
                 best_dist = 999
                 for p in people:
-                    psig = p["signature"]
+                    psig = p.get("signature")
                     if psig is None:
                         continue
                     dist = hamming_distance(sig, int(psig))
                     if dist < best_dist:
-                        best = p
                         best_dist = dist
+                        best_id = int(p["id"])
 
                 person_id: Optional[int] = None
                 is_new = False
-                if best is not None and best_dist <= 10:
-                    person_id = int(best["id"])
+                if best_id is not None and best_dist <= 14:
+                    person_id = best_id
                 else:
                     # Create a new person for this new face.
                     codename = pick_codename(used_names)
@@ -198,8 +259,15 @@ def _run_detection(*, conn, registry: JobRegistry, job_id: str, video_id: int, v
                             (codename, int(sig), now_iso, now_iso),
                         )
                         person_id = int(cur.lastrowid)
+                    people.append({"id": person_id, "codename": codename, "signature": int(sig)})
+
+                d["person_id"] = person_id
+                d["sig"] = int(sig)
+                d["is_new"] = is_new
 
                 # Record detection (for overlay).
+                person_id = int(d["person_id"])
+                sc = d.get("score")
                 with tx(conn) as cur:
                     cur.execute(
                         "INSERT INTO detections (video_id, t_sec, x, y, w, h, person_id, score) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -207,24 +275,20 @@ def _run_detection(*, conn, registry: JobRegistry, job_id: str, video_id: int, v
                     )
                     cur.execute("UPDATE persons SET last_seen = ? WHERE id = ?", (now_iso, person_id))
 
+                # Update/refresh track for this person_id.
+                tracks[person_id] = {"box": (x1, y1, x2, y2), "last_frame": frame_idx, "last_t": t_sec}
+
                 # Decide whether to capture an image.
                 should_capture = False
+                is_new = bool(d.get("is_new", False))
                 if is_new:
                     should_capture = capture_new_person
                 else:
-                    # Capture every N minutes for existing.
-                    with tx(conn) as cur:
-                        row = cur.execute("SELECT last_capture_at FROM persons WHERE id = ?", (person_id,)).fetchone()
-                    last_cap = row["last_capture_at"] if row else None
-                    if not last_cap:
+                    last_t = last_capture_t.get(person_id)
+                    if last_t is None:
                         should_capture = True
                     else:
-                        # ISO string; compare in epoch seconds by parsing.
-                        try:
-                            last_ts = _iso_to_epoch(last_cap)
-                        except Exception:
-                            last_ts = 0.0
-                        if (time.time() - last_ts) >= (existing_interval_min * 60):
+                        if (t_sec - float(last_t)) >= (existing_interval_min * 60.0):
                             should_capture = True
 
                 if should_capture:
@@ -233,6 +297,7 @@ def _run_detection(*, conn, registry: JobRegistry, job_id: str, video_id: int, v
                     out_path = out_dir / f"{int(time.time() * 1000)}.jpg"
                     cv2.imwrite(str(out_path), crop)
 
+                    sig = int(d.get("sig") or phash64_bgr(crop))
                     with tx(conn) as cur:
                         cur.execute(
                             "INSERT INTO face_images (person_id, video_id, captured_at, path, signature) VALUES (?, ?, ?, ?, ?)",
@@ -256,6 +321,12 @@ def _run_detection(*, conn, registry: JobRegistry, job_id: str, video_id: int, v
                                 except Exception:
                                     pass
                                 cur.execute("DELETE FROM face_images WHERE id = ?", (int(r["id"]),))
+                    last_capture_t[person_id] = t_sec
+
+            # Drop stale tracks.
+            stale = [pid for pid, tr in tracks.items() if (frame_idx - int(tr["last_frame"])) > (step * 10)]
+            for pid in stale:
+                tracks.pop(pid, None)
 
             frame_idx += 1
 
@@ -277,10 +348,8 @@ def _run_detection(*, conn, registry: JobRegistry, job_id: str, video_id: int, v
 
 
 def _iso_to_epoch(iso_str: str) -> float:
-    # Lazy import to keep module load fast.
+    # Deprecated: interval logic now uses video time. Kept for backward compatibility.
     from datetime import datetime
 
-    # datetime.fromisoformat supports timezone offsets.
     dt = datetime.fromisoformat(iso_str)
     return dt.timestamp()
-

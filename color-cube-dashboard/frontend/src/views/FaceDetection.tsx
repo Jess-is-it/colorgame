@@ -18,6 +18,7 @@ import {
   startDetection,
   updateSettings,
   uploadVideoWithProgress,
+  clearFaces,
   videoFileUrl,
   type Detection,
   type PersonRow,
@@ -601,9 +602,31 @@ export default function FaceDetection() {
           <CardBox>
             <div className="flex items-center justify-between gap-3 mb-4">
               <div className="font-semibold text-dark dark:text-white">Captured People</div>
-              <Button variant="outline" size="sm" onClick={() => listPersons().then(setPeople).catch(() => {})}>
-                Refresh
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => listPersons().then(setPeople).catch(() => {})}
+                >
+                  Refresh
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    if (!window.confirm('Clear all captured people and images?')) return;
+                    try {
+                      await clearFaces();
+                      const p = await listPersons();
+                      setPeople(p);
+                    } catch (e: any) {
+                      setPeopleErr(String(e?.message || e || 'failed to clear'));
+                    }
+                  }}
+                >
+                  Clear
+                </Button>
+              </div>
             </div>
 
             {peopleErr ? <div className="text-xs text-error font-mono mb-2">{peopleErr}</div> : null}
