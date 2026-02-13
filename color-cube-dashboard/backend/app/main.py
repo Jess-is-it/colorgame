@@ -13,7 +13,7 @@ from .config import ensure_dirs, get_paths
 from .face_detection import JobRegistry, start_detection_job
 from .range_response import range_file_response
 from .timeutil import now_utc_iso
-from .videos import new_video_row, probe_video, store_upload
+from .videos import new_video_row, probe_video, store_upload_stream
 
 
 paths = get_paths()
@@ -95,11 +95,9 @@ async def upload_video(file: UploadFile = File(...)) -> dict[str, Any]:
     if not file.filename:
         raise HTTPException(status_code=400, detail="missing filename")
 
-    content = await file.read()
-    if not content:
+    stored_name, out_path = await store_upload_stream(paths.videos_dir, file.filename, file)
+    if out_path.stat().st_size <= 0:
         raise HTTPException(status_code=400, detail="empty file")
-
-    stored_name, out_path = store_upload(paths.videos_dir, file.filename, content)
     meta = probe_video(out_path)
     row = new_video_row(file.filename, stored_name, meta)
 
@@ -130,12 +128,10 @@ async def replace_video(video_id: int, file: UploadFile = File(...)) -> dict[str
     if not existing:
         raise HTTPException(status_code=404, detail="video not found")
 
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="empty file")
-
     # Store a new file and swap the DB record; delete old file best-effort.
-    stored_name, out_path = store_upload(paths.videos_dir, file.filename or existing["original_name"], content)
+    stored_name, out_path = await store_upload_stream(paths.videos_dir, file.filename or existing["original_name"], file)
+    if out_path.stat().st_size <= 0:
+        raise HTTPException(status_code=400, detail="empty file")
     meta = probe_video(out_path)
 
     with dbmod.tx(conn) as cur:

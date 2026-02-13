@@ -14,7 +14,6 @@ import {
   listPersonImages,
   listPersons,
   listVideos,
-  replaceVideo,
   startDetection,
   updateSettings,
   uploadVideo,
@@ -49,6 +48,7 @@ export default function FaceDetection() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rafRef = useRef<number | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const [healthOk, setHealthOk] = useState<boolean>(false);
   const [healthErr, setHealthErr] = useState<string>('');
@@ -63,7 +63,6 @@ export default function FaceDetection() {
   const [uploading, setUploading] = useState<boolean>(false);
   const [videoUploadErr, setVideoUploadErr] = useState<string>('');
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [replaceFile, setReplaceFile] = useState<File | null>(null);
 
   const [settings, setSettings] = useState<Settings | null>(null);
   const [settingsErr, setSettingsErr] = useState<string>('');
@@ -208,6 +207,7 @@ export default function FaceDetection() {
       setVideos(next);
       setSelectedVideoId(v.id);
       setUploadFile(null);
+      if (uploadInputRef.current) uploadInputRef.current.value = '';
     } catch (e: any) {
       setVideoUploadErr(String(e?.message || e || 'upload failed'));
     } finally {
@@ -215,34 +215,19 @@ export default function FaceDetection() {
     }
   }
 
-  async function onReplaceVideo() {
-    if (!selectedVideoId || !replaceFile) return;
-    setUploading(true);
-    setVideoUploadErr('');
-    try {
-      await replaceVideo(selectedVideoId, replaceFile);
-      const next = await listVideos();
-      setVideos(next);
-      setReplaceFile(null);
-    } catch (e: any) {
-      setVideoUploadErr(String(e?.message || e || 'replace failed'));
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  async function onDeleteVideo() {
-    if (!selectedVideoId) return;
+  async function onDeleteVideoRow(videoId: number) {
     if (!window.confirm('Delete this video?')) return;
     setUploading(true);
     setVideoUploadErr('');
     try {
-      await deleteVideo(selectedVideoId);
+      await deleteVideo(videoId);
       const next = await listVideos();
       setVideos(next);
-      setSelectedVideoId(next[0]?.id ?? null);
-      setDetections([]);
-      stopRaf();
+      if (selectedVideoId === videoId) {
+        setSelectedVideoId(next[0]?.id ?? null);
+        setDetections([]);
+        stopRaf();
+      }
     } catch (e: any) {
       setVideoUploadErr(String(e?.message || e || 'delete failed'));
     } finally {
@@ -354,7 +339,9 @@ export default function FaceDetection() {
         <div className="lg:col-span-2 space-y-6">
           <CardBox className="p-0 overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-ld">
-              <div className="font-semibold text-dark dark:text-white">Video Player</div>
+              <div className="font-semibold text-dark dark:text-white">
+                Video Player{selectedVideo ? ` - ${selectedVideo.original_name}` : ''}
+              </div>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={playPause} disabled={!selectedVideoId}>
                   Play / Pause
@@ -421,66 +408,30 @@ export default function FaceDetection() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="md:col-span-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
-                  />
-                  <Button onClick={onUploadVideo} disabled={!uploadFile || uploading}>
-                    {uploading ? 'Uploading...' : 'Add Video'}
-                  </Button>
-                </div>
-                <div className="flex items-center gap-2 mt-3">
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={(e) => setReplaceFile(e.target.files?.[0] ?? null)}
-                    disabled={!selectedVideoId}
-                  />
-                  <Button variant="outline" onClick={onReplaceVideo} disabled={!selectedVideoId || !replaceFile || uploading}>
-                    Replace Selected
-                  </Button>
-                  <Button variant="outline" onClick={onDeleteVideo} disabled={!selectedVideoId || uploading}>
-                    Delete Selected
-                  </Button>
-                  <Button variant="outline" onClick={refreshAll} disabled={uploading}>
-                    Refresh
-                  </Button>
-                </div>
-                {videoUploadErr ? <div className="mt-2 text-xs text-error font-mono">{videoUploadErr}</div> : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept="video/*"
+                className="hidden"
+                onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
+              />
+              <Button
+                variant="outline"
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={uploading}
+              >
+                Choose Video
+              </Button>
+              <div className="text-sm text-darklink dark:text-darklink min-w-[220px] truncate">
+                {uploadFile ? uploadFile.name : 'No file selected'}
               </div>
-
-              <div>
-                <label className="text-sm text-dark dark:text-white">Selected Video</label>
-                <select
-                  className="mt-1 w-full border border-ld rounded px-3 py-2 bg-white dark:bg-dark text-sm"
-                  value={selectedVideoId ?? ''}
-                  onChange={(e) => setSelectedVideoId(e.target.value ? Number(e.target.value) : null)}
-                >
-                  <option value="" disabled>
-                    (none)
-                  </option>
-                  {videos.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      #{v.id} - {v.original_name}
-                    </option>
-                  ))}
-                </select>
-                {selectedVideo ? (
-                  <div className="mt-2 text-xs text-darklink dark:text-darklink">
-                    Duration: <span className="font-mono">{selectedVideo.duration_sec?.toFixed?.(1) ?? 'n/a'}s</span>
-                    <br />
-                    Size:{' '}
-                    <span className="font-mono">
-                      {selectedVideo.width ?? 'n/a'}x{selectedVideo.height ?? 'n/a'}
-                    </span>
-                  </div>
-                ) : null}
-              </div>
+              <Button onClick={onUploadVideo} disabled={!uploadFile || uploading}>
+                {uploading ? 'Uploading...' : 'Add Video'}
+              </Button>
             </div>
+
+            {videoUploadErr ? <div className="mt-2 text-xs text-error font-mono">{videoUploadErr}</div> : null}
 
             <div className="mt-4 overflow-x-auto">
               <table className="w-full text-sm">
@@ -499,13 +450,23 @@ export default function FaceDetection() {
                       <td className="py-2 pr-3">{v.original_name}</td>
                       <td className="py-2 pr-3">{fmtIso(v.uploaded_at)}</td>
                       <td className="py-2 pr-3">
-                        <Button
-                          size="sm"
-                          variant={v.id === selectedVideoId ? 'default' : 'outline'}
-                          onClick={() => setSelectedVideoId(v.id)}
-                        >
-                          {v.id === selectedVideoId ? 'Selected' : 'Play'}
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant={v.id === selectedVideoId ? 'default' : 'outline'}
+                            onClick={() => setSelectedVideoId(v.id)}
+                          >
+                            {v.id === selectedVideoId ? 'Playing' : 'Play'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => onDeleteVideoRow(v.id)}
+                            disabled={uploading}
+                          >
+                            Delete
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -684,4 +645,3 @@ export default function FaceDetection() {
     </div>
   );
 }
-

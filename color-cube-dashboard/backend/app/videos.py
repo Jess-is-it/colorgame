@@ -39,12 +39,30 @@ def probe_video(path: Path) -> dict[str, Any]:
     finally:
         cap.release()
 
-
-def store_upload(videos_dir: Path, original_name: str, content: bytes) -> tuple[str, Path]:
+def store_upload_bytes(videos_dir: Path, original_name: str, content: bytes) -> tuple[str, Path]:
     ext = safe_ext(original_name)
     stored_name = f"{uuid4().hex}{ext}"
     out_path = videos_dir / stored_name
     out_path.write_bytes(content)
+    return stored_name, out_path
+
+
+async def store_upload_stream(videos_dir: Path, original_name: str, upload_file) -> tuple[str, Path]:
+    """
+    Store an UploadFile-like object without reading the entire content into memory.
+    """
+    ext = safe_ext(original_name)
+    stored_name = f"{uuid4().hex}{ext}"
+    out_path = videos_dir / stored_name
+
+    # UploadFile.read() is async; write in chunks to support large videos.
+    with out_path.open("wb") as f:
+        while True:
+            chunk = await upload_file.read(1024 * 1024)
+            if not chunk:
+                break
+            f.write(chunk)
+
     return stored_name, out_path
 
 
@@ -63,4 +81,3 @@ def new_video_row(original_name: str, stored_name: str, meta: dict[str, Any]) ->
         "height": meta.get("height"),
         "fps": meta.get("fps"),
     }
-
