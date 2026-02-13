@@ -37,14 +37,6 @@ export type Detection = {
   score?: number | null;
 };
 
-export type LiveFaceBox = {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  score?: number | null;
-};
-
 export type JobStatus = {
   job_id: string;
   video_id: number;
@@ -219,13 +211,6 @@ export function getJob(jobId: string): Promise<JobStatus> {
 export async function getDetections(videoId: number): Promise<Detection[]> {
   const r = await getJson<{ detections: Detection[] }>(`api/videos/${videoId}/detections`);
   return r.detections || [];
-}
-
-export async function getLiveFaces(videoId: number, tSec: number): Promise<LiveFaceBox[]> {
-  const r = await getJson<{ t: number; faces: LiveFaceBox[] }>(
-    `api/videos/${videoId}/faces?t=${encodeURIComponent(String(tSec))}`,
-  );
-  return r.faces || [];
 }
 
 export async function listPersons(): Promise<PersonRow[]> {

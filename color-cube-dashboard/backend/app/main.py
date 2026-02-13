@@ -11,7 +11,6 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from . import db as dbmod
 from .config import ensure_dirs, get_paths
 from .face_detection import JobRegistry, start_detection_job
-from .live_faces import detect_faces_at_time
 from .range_response import range_file_response
 from .timeutil import now_utc_iso
 from .videos import new_video_row, probe_video, store_upload_stream
@@ -354,26 +353,6 @@ def get_detections(video_id: int, t0: Optional[float] = None, t1: Optional[float
         tuple(params),
     ).fetchall()
     return {"detections": [dict(r) for r in rows]}
-
-
-@app.get("/api/videos/{video_id}/faces")
-def live_faces(video_id: int, t: float) -> dict[str, Any]:
-    """
-    Step 1 (live overlay): detect faces for a single timestamp in the video.
-    This does NOT save persons/images; it only returns boxes for drawing overlays.
-    """
-    row = conn.execute("SELECT stored_name FROM videos WHERE id = ?", (video_id,)).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="video not found")
-    video_path = paths.videos_dir / row["stored_name"]
-    if not video_path.exists():
-        raise HTTPException(status_code=404, detail="file missing on disk")
-
-    faces = detect_faces_at_time(video_path=video_path, t_sec=float(t))
-    return {
-        "t": float(t),
-        "faces": [{"x": f.x, "y": f.y, "w": f.w, "h": f.h, "score": f.score} for f in faces],
-    }
 
 
 @app.get("/api/persons")
