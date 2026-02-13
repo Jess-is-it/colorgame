@@ -143,6 +143,74 @@ async def upload_video(file: UploadFile = File(...)) -> dict[str, Any]:
     return {"video": {"id": video_id, **row}}
 
 
+@app.post("/api/videos/raw")
+async def upload_video_raw(request: Request, filename: str = "video.mp4") -> dict[str, Any]:
+    """
+    Raw upload path to avoid multipart parsing failures for large files / low disk.
+    The frontend uses this endpoint for reliable uploads with progress.
+    """
+    from uuid import uuid4
+    import os as _os
+
+    # Drop any client path fragments.
+    original_name = Path(str(filename)).name or "video.mp4"
+    _, ext = _os.path.splitext(original_name)
+    ext = (ext or "").lower()
+    if not ext or len(ext) > 10:
+        ext = ".mp4"
+
+    stored_name = f"{uuid4().hex}{ext}"
+    out_path = paths.videos_dir / stored_name
+
+    try:
+        with out_path.open("wb") as f:
+            async for chunk in request.stream():
+                if not chunk:
+                    continue
+                f.write(chunk)
+    except OSError as e:
+        try:
+            out_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        if getattr(e, "errno", None) == 28:
+            raise HTTPException(
+                status_code=507,
+                detail="No space left on device while uploading. Free disk space or move storage to a larger mount.",
+            )
+        raise
+
+    if out_path.stat().st_size <= 0:
+        try:
+            out_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail="empty file")
+
+    meta = probe_video(out_path)
+    row = new_video_row(original_name, stored_name, meta)
+
+    with dbmod.tx(conn) as cur:
+        cur.execute(
+            """
+            INSERT INTO videos (original_name, stored_name, uploaded_at, duration_sec, width, height, fps)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["original_name"],
+                row["stored_name"],
+                row["uploaded_at"],
+                row["duration_sec"],
+                row["width"],
+                row["height"],
+                row["fps"],
+            ),
+        )
+        video_id = int(cur.lastrowid)
+
+    return {"video": {"id": video_id, **row}}
+
+
 @app.put("/api/videos/{video_id}")
 async def replace_video(video_id: int, file: UploadFile = File(...)) -> dict[str, Any]:
     existing = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()

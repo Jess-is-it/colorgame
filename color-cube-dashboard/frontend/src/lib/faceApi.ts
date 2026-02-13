@@ -133,9 +133,8 @@ export function uploadVideoWithProgress(
   file: File,
   onProgress: (p: { loaded: number; total?: number; pct?: number }) => void,
 ): Promise<VideoRow> {
-  const url = joinUrl(API_BASE_URL, 'api/videos');
-  const fd = new FormData();
-  fd.append('file', file);
+  // Use the raw endpoint to avoid multipart parsing issues on the server for large uploads.
+  const url = joinUrl(API_BASE_URL, `api/videos/raw?filename=${encodeURIComponent(file.name || 'video.mp4')}`);
 
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -174,7 +173,8 @@ export function uploadVideoWithProgress(
       }
     };
 
-    xhr.send(fd);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.send(file);
   });
 }
 
