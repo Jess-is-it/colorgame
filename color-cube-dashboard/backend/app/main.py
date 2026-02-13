@@ -1,21 +1,33 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+from typing import Any, Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse
 
-from .camera import CameraManager
-from .config import load_config
+from . import db as dbmod
+from .config import ensure_dirs, get_paths
+from .face_detection import JobRegistry, start_detection_job
+from .range_response import range_file_response
+from .timeutil import now_utc_iso
+from .videos import new_video_row, probe_video, store_upload
 
 
-cfg = load_config()
-camera = CameraManager(cfg)
+paths = get_paths()
+ensure_dirs()
+os.chdir(str(paths.root))  # ensure face_detect relative model paths resolve
 
-app = FastAPI(title="Color Cube Dashboard API")
+conn = dbmod.connect(paths.db_path)
+dbmod.init_db(conn)
 
-# Step 1: keep CORS simple; this is a local network dashboard.
+jobs = JobRegistry()
+
+app = FastAPI(title="Face Detection API")
+
+# Local-network dashboard; keep CORS permissive for now.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,32 +36,263 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.on_event("startup")
-def _startup() -> None:
-    camera.start()
-
-
-@app.on_event("shutdown")
-def _shutdown() -> None:
-    camera.stop()
-
 
 @app.get("/health")
-def health():
+def health() -> dict[str, bool]:
     return {"ok": True}
 
 
-@app.get("/api/camera/status")
-def camera_status():
-    return camera.status()
+@app.get("/api/settings")
+def get_settings() -> dict[str, Any]:
+    row = conn.execute(
+        "SELECT capture_new_person, existing_capture_interval_minutes, max_images_per_person, sample_fps FROM settings WHERE id=1"
+    ).fetchone()
+    return {
+        "capture_new_person": bool(row["capture_new_person"]),
+        "existing_capture_interval_minutes": int(row["existing_capture_interval_minutes"]),
+        "max_images_per_person": int(row["max_images_per_person"]),
+        "sample_fps": float(row["sample_fps"]),
+    }
 
 
-@app.get("/stream")
-def stream():
-    # MJPEG streaming endpoint.
-    return StreamingResponse(
-        camera.mjpeg_generator(),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={"Cache-Control": "no-store"},
-    )
+@app.put("/api/settings")
+def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    capture_new_person = 1 if bool(payload.get("capture_new_person", True)) else 0
+    existing = int(payload.get("existing_capture_interval_minutes", 10))
+    max_imgs = int(payload.get("max_images_per_person", 40))
+    sample_fps = float(payload.get("sample_fps", 2.0))
 
+    if existing < 0:
+        raise HTTPException(status_code=400, detail="existing_capture_interval_minutes must be >= 0")
+    if max_imgs < 1:
+        raise HTTPException(status_code=400, detail="max_images_per_person must be >= 1")
+    if sample_fps <= 0:
+        raise HTTPException(status_code=400, detail="sample_fps must be > 0")
+
+    with dbmod.tx(conn) as cur:
+        cur.execute(
+            """
+            UPDATE settings
+            SET capture_new_person = ?,
+                existing_capture_interval_minutes = ?,
+                max_images_per_person = ?,
+                sample_fps = ?
+            WHERE id = 1
+            """,
+            (capture_new_person, existing, max_imgs, sample_fps),
+        )
+    return get_settings()
+
+
+@app.get("/api/videos")
+def list_videos() -> dict[str, Any]:
+    rows = conn.execute("SELECT * FROM videos ORDER BY uploaded_at DESC").fetchall()
+    return {"videos": [dict(r) for r in rows]}
+
+
+@app.post("/api/videos")
+async def upload_video(file: UploadFile = File(...)) -> dict[str, Any]:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="missing filename")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="empty file")
+
+    stored_name, out_path = store_upload(paths.videos_dir, file.filename, content)
+    meta = probe_video(out_path)
+    row = new_video_row(file.filename, stored_name, meta)
+
+    with dbmod.tx(conn) as cur:
+        cur.execute(
+            """
+            INSERT INTO videos (original_name, stored_name, uploaded_at, duration_sec, width, height, fps)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                row["original_name"],
+                row["stored_name"],
+                row["uploaded_at"],
+                row["duration_sec"],
+                row["width"],
+                row["height"],
+                row["fps"],
+            ),
+        )
+        video_id = int(cur.lastrowid)
+
+    return {"video": {"id": video_id, **row}}
+
+
+@app.put("/api/videos/{video_id}")
+async def replace_video(video_id: int, file: UploadFile = File(...)) -> dict[str, Any]:
+    existing = conn.execute("SELECT * FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not existing:
+        raise HTTPException(status_code=404, detail="video not found")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="empty file")
+
+    # Store a new file and swap the DB record; delete old file best-effort.
+    stored_name, out_path = store_upload(paths.videos_dir, file.filename or existing["original_name"], content)
+    meta = probe_video(out_path)
+
+    with dbmod.tx(conn) as cur:
+        cur.execute(
+            """
+            UPDATE videos
+            SET original_name = ?, stored_name = ?, uploaded_at = ?, duration_sec = ?, width = ?, height = ?, fps = ?
+            WHERE id = ?
+            """,
+            (
+                file.filename or existing["original_name"],
+                stored_name,
+                now_utc_iso(),
+                meta.get("duration_sec"),
+                meta.get("width"),
+                meta.get("height"),
+                meta.get("fps"),
+                video_id,
+            ),
+        )
+
+    try:
+        Path(paths.videos_dir / existing["stored_name"]).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    return {"ok": True}
+
+
+@app.delete("/api/videos/{video_id}")
+def delete_video(video_id: int) -> dict[str, Any]:
+    row = conn.execute("SELECT stored_name FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="video not found")
+
+    stored = row["stored_name"]
+    with dbmod.tx(conn) as cur:
+        cur.execute("DELETE FROM videos WHERE id = ?", (video_id,))
+
+    try:
+        (paths.videos_dir / stored).unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    return {"ok": True}
+
+
+@app.get("/api/videos/{video_id}/file")
+def get_video_file(video_id: int, request: Request):
+    row = conn.execute("SELECT stored_name FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="video not found")
+
+    path = paths.videos_dir / row["stored_name"]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="file missing on disk")
+
+    return range_file_response(path, request)
+
+
+@app.post("/api/videos/{video_id}/detect")
+def detect_faces(video_id: int) -> dict[str, Any]:
+    row = conn.execute("SELECT stored_name FROM videos WHERE id = ?", (video_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="video not found")
+
+    video_path = paths.videos_dir / row["stored_name"]
+    job_id = start_detection_job(conn=conn, registry=jobs, video_id=video_id, video_path=video_path, faces_dir=paths.faces_dir)
+    return {"job_id": job_id}
+
+
+@app.get("/api/jobs/{job_id}")
+def job_status(job_id: str) -> dict[str, Any]:
+    d = jobs.as_dict(job_id)
+    if not d:
+        raise HTTPException(status_code=404, detail="job not found")
+    return d
+
+
+@app.get("/api/videos/{video_id}/detections")
+def get_detections(video_id: int, t0: Optional[float] = None, t1: Optional[float] = None) -> dict[str, Any]:
+    params: list[Any] = [video_id]
+    where = "video_id = ?"
+    if t0 is not None:
+        where += " AND t_sec >= ?"
+        params.append(float(t0))
+    if t1 is not None:
+        where += " AND t_sec <= ?"
+        params.append(float(t1))
+
+    rows = conn.execute(
+        f"SELECT video_id, t_sec, x, y, w, h, person_id, score FROM detections WHERE {where} ORDER BY t_sec ASC",
+        tuple(params),
+    ).fetchall()
+    return {"detections": [dict(r) for r in rows]}
+
+
+@app.get("/api/persons")
+def list_persons() -> dict[str, Any]:
+    rows = conn.execute(
+        """
+        SELECT p.id, p.codename, p.last_seen,
+               (SELECT path FROM face_images fi WHERE fi.person_id = p.id ORDER BY fi.captured_at DESC LIMIT 1) AS thumbnail_path,
+               (SELECT COUNT(1) FROM face_images fi2 WHERE fi2.person_id = p.id) AS image_count
+        FROM persons p
+        ORDER BY COALESCE(p.last_seen, p.created_at) DESC
+        """
+    ).fetchall()
+    people = []
+    for r in rows:
+        d = dict(r)
+        d["thumbnail_url"] = f"/api/persons/{d['id']}/thumbnail"
+        people.append(d)
+    return {"persons": people}
+
+
+@app.get("/api/persons/{person_id}/thumbnail")
+def get_thumbnail(person_id: int):
+    row = conn.execute(
+        "SELECT path FROM face_images WHERE person_id = ? ORDER BY captured_at DESC LIMIT 1",
+        (person_id,),
+    ).fetchone()
+    if not row:
+        # Use a 1x1 placeholder to keep the UI simple.
+        return JSONResponse(status_code=404, content={"detail": "no images"})
+
+    p = Path(row["path"])
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="file missing on disk")
+    return FileResponse(str(p), headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/persons/{person_id}/images")
+def list_person_images(person_id: int) -> dict[str, Any]:
+    rows = conn.execute(
+        "SELECT id, captured_at, path FROM face_images WHERE person_id = ? ORDER BY captured_at DESC",
+        (person_id,),
+    ).fetchall()
+    images = []
+    for r in rows:
+        rid = int(r["id"])
+        images.append(
+            {
+                "id": rid,
+                "captured_at": r["captured_at"],
+                "url": f"/api/face-images/{rid}/file",
+            }
+        )
+    return {"images": images}
+
+
+@app.get("/api/face-images/{image_id}/file")
+def get_face_image_file(image_id: int):
+    row = conn.execute("SELECT path FROM face_images WHERE id = ?", (image_id,)).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="image not found")
+    p = Path(row["path"])
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="file missing on disk")
+    return FileResponse(str(p), headers={"Cache-Control": "no-store"})

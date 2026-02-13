@@ -32,3 +32,6 @@ color-cube-dashboard/.run/
 # App runtime
 data/
 hls/
+
+# Face detection runtime data
+color-cube-dashboard/backend/data/

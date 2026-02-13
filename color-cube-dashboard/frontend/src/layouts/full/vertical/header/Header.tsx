@@ -31,9 +31,7 @@ const Header = ({ layoutType }: HeaderPropsType) => {
               <Icon icon="tabler:menu-2" height={20} />
             </span>
 
-            <div className="text-lg font-semibold text-dark dark:text-white">
-              Color Cube Dashboard
-            </div>
+            <div className="text-lg font-semibold text-dark dark:text-white">Face Detection</div>
           </div>
 
           <div className="flex items-center gap-1">
@@ -73,4 +71,3 @@ const Header = ({ layoutType }: HeaderPropsType) => {
 };
 
 export default Header;
-

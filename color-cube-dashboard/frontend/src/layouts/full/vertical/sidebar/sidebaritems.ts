@@ -37,8 +37,8 @@ const SidebarContent: MenuItem[] = [
     heading: 'Home',
     children: [
       {
-        name: 'Dashboard',
-        icon: 'solar:widget-2-linear',
+        name: 'Face Detection',
+        icon: 'solar:user-speak-rounded-linear',
         id: uniqueId(),
         url: '/',
       },
@@ -47,4 +47,3 @@ const SidebarContent: MenuItem[] = [
 ];
 
 export default SidebarContent;
-

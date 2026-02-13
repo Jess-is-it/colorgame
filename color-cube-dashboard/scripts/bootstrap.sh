@@ -8,10 +8,11 @@ cd "$ROOT_DIR/backend"
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --no-cache-dir -r requirements.txt
+echo "[bootstrap] installing torch (CPU-only)"
+pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision
 
 echo "[bootstrap] frontend deps"
 cd "$ROOT_DIR/frontend"
 npm install --no-fund --no-audit
 
 echo "[bootstrap] done"
-
