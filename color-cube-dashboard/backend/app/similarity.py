@@ -28,7 +28,18 @@ def phash64_bgr(face_bgr: np.ndarray) -> int:
     """
     if face_bgr is None or face_bgr.size == 0:
         return 0
-    gray = cv2.cvtColor(face_bgr, cv2.COLOR_BGR2GRAY)
+    h, w = face_bgr.shape[:2]
+    # Reduce background influence by hashing the central region.
+    cx1 = int(w * 0.10)
+    cy1 = int(h * 0.10)
+    cx2 = int(w * 0.90)
+    cy2 = int(h * 0.90)
+    if cx2 <= cx1 + 2 or cy2 <= cy1 + 2:
+        crop = face_bgr
+    else:
+        crop = face_bgr[cy1:cy2, cx1:cx2]
+
+    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
     img = cv2.resize(gray, (32, 32), interpolation=cv2.INTER_AREA)
     img_f = np.float32(img)
     dct = cv2.dct(img_f)

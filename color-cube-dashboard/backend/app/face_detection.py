@@ -149,10 +149,17 @@ def _run_detection(*, conn, registry: JobRegistry, job_id: str, video_id: int, v
             fps = 30.0
         step = max(1, int(round(fps / max(sample_fps, 0.25))))
 
-        # In this project, the "main" faces are usually the largest ones on screen.
-        # This avoids creating persons for tiny avatars/icons in the UI.
+        # Heuristics: prioritize "main" faces and ignore UI/avatar faces.
         max_faces_per_frame = 2
-        min_face_px = 80  # ignore very small faces
+        min_face_px = 120
+        min_score = 0.75
+        ignore_bottom_ratio = 0.25  # ignore faces in bottom HUD area
+        min_area_ratio = 0.004  # ignore small faces relative to the frame
+        max_persons = 2  # your typical video has 2 hosts; avoid creating endless persons
+
+        match_dist_thresh = 24  # higher = more aggressive merging
+        create_score_thresh = 0.85
+        min_crop_std = 12.0  # ignore very flat/solid crops (often false positives)
 
         # Clear previous detections for this video (keep people + images).
         with tx(conn) as cur:
@@ -160,9 +167,28 @@ def _run_detection(*, conn, registry: JobRegistry, job_id: str, video_id: int, v
 
         # Cache people once per job; update in memory when new persons are created.
         with tx(conn) as cur:
-            people_rows = cur.execute("SELECT id, codename, signature FROM persons").fetchall()
-        people = [{"id": int(r["id"]), "codename": r["codename"], "signature": r["signature"]} for r in people_rows]
+            people_rows = cur.execute("SELECT id, codename FROM persons").fetchall()
+            # Keep a few recent signatures per person for more robust matching.
+            sig_rows = cur.execute(
+                """
+                SELECT person_id, signature
+                FROM face_images
+                WHERE signature IS NOT NULL
+                ORDER BY captured_at DESC
+                """
+            ).fetchall()
+
+        people = [{"id": int(r["id"]), "codename": r["codename"]} for r in people_rows]
         used_names = {p["codename"] for p in people}
+        person_sigs: dict[int, list[int]] = {}
+        for r in sig_rows:
+            pid = int(r["person_id"])
+            sig = r["signature"]
+            if sig is None:
+                continue
+            lst = person_sigs.setdefault(pid, [])
+            if len(lst) < 8:
+                lst.append(int(sig))
 
         # Keep last capture by *video time* so interval makes sense for offline videos.
         last_capture_t: dict[int, float] = {}
@@ -201,7 +227,14 @@ def _run_detection(*, conn, registry: JobRegistry, job_id: str, video_id: int, v
                 x1, y1, x2, y2 = _clamp_box(x1, y1, x2, y2, w, h)
                 bw = x2 - x1
                 bh = y2 - y1
+                if sc is not None and sc < min_score:
+                    continue
                 if bw < min_face_px or bh < min_face_px:
+                    continue
+                if y2 > int(h * (1.0 - ignore_bottom_ratio)):
+                    continue
+                area = bw * bh
+                if area < int((w * h) * min_area_ratio):
                     continue
                 dets.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2, "score": sc, "area": bw * bh})
             dets.sort(key=lambda d: d["area"], reverse=True)
@@ -230,36 +263,52 @@ def _run_detection(*, conn, registry: JobRegistry, job_id: str, video_id: int, v
             for d in unmatched:
                 x1, y1, x2, y2 = d["x1"], d["y1"], d["x2"], d["y2"]
                 crop = frame[y1:y2, x1:x2].copy()
+                if crop.size == 0:
+                    continue
+                # Ignore near-uniform crops (common on false positives).
+                if float(np.std(crop)) < min_crop_std:
+                    continue
+
                 sig = phash64_bgr(crop)
 
                 # Match to existing person by signature (fallback).
                 best_id: Optional[int] = None
                 best_dist = 999
                 for p in people:
-                    psig = p.get("signature")
-                    if psig is None:
+                    pid = int(p["id"])
+                    sigs = person_sigs.get(pid) or []
+                    if not sigs:
                         continue
-                    dist = hamming_distance(sig, int(psig))
+                    dist = min(hamming_distance(sig, s) for s in sigs)
                     if dist < best_dist:
                         best_dist = dist
-                        best_id = int(p["id"])
+                        best_id = pid
 
                 person_id: Optional[int] = None
                 is_new = False
-                if best_id is not None and best_dist <= 14:
+                if best_id is not None and best_dist <= match_dist_thresh:
                     person_id = best_id
                 else:
-                    # Create a new person for this new face.
-                    codename = pick_codename(used_names)
-                    used_names.add(codename)
-                    is_new = True
-                    with tx(conn) as cur:
-                        cur.execute(
-                            "INSERT INTO persons (codename, signature, created_at, last_seen) VALUES (?, ?, ?, ?)",
-                            (codename, int(sig), now_iso, now_iso),
-                        )
-                        person_id = int(cur.lastrowid)
-                    people.append({"id": person_id, "codename": codename, "signature": int(sig)})
+                    # Create a new person only if we haven't hit the limit and detection is confident.
+                    if len(people) < max_persons and (d.get("score") or 0.0) >= create_score_thresh:
+                        codename = pick_codename(used_names)
+                        used_names.add(codename)
+                        is_new = True
+                        with tx(conn) as cur:
+                            cur.execute(
+                                "INSERT INTO persons (codename, signature, created_at, last_seen) VALUES (?, ?, ?, ?)",
+                                (codename, int(sig), now_iso, now_iso),
+                            )
+                            person_id = int(cur.lastrowid)
+                        people.append({"id": person_id, "codename": codename})
+                        person_sigs.setdefault(person_id, []).append(int(sig))
+                    else:
+                        # Not confident enough to create a new person. If we have existing persons,
+                        # snap to the closest one to avoid creating junk "persons".
+                        if best_id is not None:
+                            person_id = best_id
+                        else:
+                            continue
 
                 d["person_id"] = person_id
                 d["sig"] = int(sig)
@@ -322,6 +371,11 @@ def _run_detection(*, conn, registry: JobRegistry, job_id: str, video_id: int, v
                                     pass
                                 cur.execute("DELETE FROM face_images WHERE id = ?", (int(r["id"]),))
                     last_capture_t[person_id] = t_sec
+                    # Keep recent signatures for matching.
+                    sigs = person_sigs.setdefault(person_id, [])
+                    sigs.insert(0, int(sig))
+                    if len(sigs) > 8:
+                        del sigs[8:]
 
             # Drop stale tracks.
             stale = [pid for pid, tr in tracks.items() if (frame_idx - int(tr["last_frame"])) > (step * 10)]
