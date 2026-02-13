@@ -47,6 +47,13 @@ export type JobStatus = {
   finished_at?: string | null;
 };
 
+export type StorageStatus = {
+  data_dir: string;
+  total_bytes: number;
+  used_bytes: number;
+  free_bytes: number;
+};
+
 function defaultBaseUrl(): string {
   // If opened from another machine, "localhost" is the client machine.
   // Default to the same host serving the frontend, but with backend port 8000.
@@ -97,6 +104,10 @@ export function getHealth(): Promise<HealthResponse> {
 
 export function getSettings(): Promise<Settings> {
   return getJson<Settings>('api/settings');
+}
+
+export function getStorageStatus(): Promise<StorageStatus> {
+  return getJson<StorageStatus>('api/storage/status');
 }
 
 export function updateSettings(s: Partial<Settings>): Promise<Settings> {

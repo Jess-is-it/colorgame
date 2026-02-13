@@ -55,6 +55,19 @@ def get_settings() -> dict[str, Any]:
     }
 
 
+@app.get("/api/storage/status")
+def storage_status() -> dict[str, Any]:
+    import shutil
+
+    usage = shutil.disk_usage(paths.data_dir)
+    return {
+        "data_dir": str(paths.data_dir),
+        "total_bytes": int(usage.total),
+        "used_bytes": int(usage.used),
+        "free_bytes": int(usage.free),
+    }
+
+
 @app.put("/api/settings")
 def update_settings(payload: dict[str, Any]) -> dict[str, Any]:
     capture_new_person = 1 if bool(payload.get("capture_new_person", True)) else 0

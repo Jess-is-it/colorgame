@@ -11,6 +11,7 @@ import {
   getHealth,
   getJob,
   getSettings,
+  getStorageStatus,
   listPersonImages,
   listPersons,
   listVideos,
@@ -69,6 +70,7 @@ export default function FaceDetection() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [settingsErr, setSettingsErr] = useState<string>('');
   const [savingSettings, setSavingSettings] = useState<boolean>(false);
+  const [storage, setStorage] = useState<{ free_bytes: number; total_bytes: number; data_dir: string } | null>(null);
 
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [peopleErr, setPeopleErr] = useState<string>('');
@@ -115,6 +117,13 @@ export default function FaceDetection() {
       setSettingsErr('');
     } catch (e: any) {
       setSettingsErr(String(e?.message || e || 'failed to load settings'));
+    }
+
+    try {
+      const st = await getStorageStatus();
+      setStorage(st);
+    } catch (_) {
+      // Non-critical.
     }
 
     try {
@@ -511,6 +520,12 @@ export default function FaceDetection() {
             <div className="font-semibold text-dark dark:text-white mb-4">Settings</div>
             {settings ? (
               <div className="space-y-3 text-sm">
+                {storage ? (
+                  <div className="text-xs text-darklink dark:text-darklink">
+                    Storage: <span className="font-mono">{Math.round(storage.free_bytes / 1024 / 1024)} MB</span>{' '}
+                    free in <span className="font-mono">{storage.data_dir}</span>
+                  </div>
+                ) : null}
                 <label className="block">
                   <div className="text-dark dark:text-white mb-1">Capture new person</div>
                   <select
