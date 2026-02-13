@@ -7,7 +7,6 @@ import {
   API_BASE_URL,
   apiUrl,
   deleteVideo,
-  getDetections,
   getHealth,
   getJob,
   getSettings,
@@ -20,7 +19,6 @@ import {
   uploadVideoWithProgress,
   clearFaces,
   videoFileUrl,
-  type Detection,
   type PersonRow,
   type Settings,
   type VideoRow,
@@ -48,8 +46,6 @@ type PersonImagesModalState = {
 
 export default function FaceDetection() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rafRef = useRef<number | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const [healthOk, setHealthOk] = useState<boolean>(false);
@@ -76,7 +72,6 @@ export default function FaceDetection() {
   const [people, setPeople] = useState<PersonRow[]>([]);
   const [peopleErr, setPeopleErr] = useState<string>('');
 
-  const [detections, setDetections] = useState<Detection[]>([]);
   const [detecting, setDetecting] = useState<boolean>(false);
   const [jobId, setJobId] = useState<string>('');
   const [jobMsg, setJobMsg] = useState<string>('');
@@ -146,69 +141,6 @@ export default function FaceDetection() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Ensure the canvas tracks the rendered video size.
-  function syncCanvasSize() {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
-    const rect = video.getBoundingClientRect();
-    const w = Math.max(1, Math.round(rect.width));
-    const h = Math.max(1, Math.round(rect.height));
-    if (canvas.width !== w) canvas.width = w;
-    if (canvas.height !== h) canvas.height = h;
-  }
-
-  function drawOverlay() {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    syncCanvasSize();
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    if (!detections.length || !video.videoWidth || !video.videoHeight) return;
-
-    const t = video.currentTime;
-    const windowSec = 0.45;
-    const relevant = detections.filter((d) => Math.abs(d.t_sec - t) <= windowSec);
-    if (!relevant.length) return;
-
-    const sx = canvas.width / video.videoWidth;
-    const sy = canvas.height / video.videoHeight;
-
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = 'rgba(34,197,94,0.95)'; // green-500
-    ctx.fillStyle = 'rgba(34,197,94,0.10)';
-
-    for (const d of relevant) {
-      const x = d.x * sx;
-      const y = d.y * sy;
-      const w = d.w * sx;
-      const h = d.h * sy;
-      ctx.fillRect(x, y, w, h);
-      ctx.strokeRect(x, y, w, h);
-    }
-  }
-
-  function startRaf() {
-    if (rafRef.current) return;
-    const tick = () => {
-      drawOverlay();
-      rafRef.current = window.requestAnimationFrame(tick);
-    };
-    rafRef.current = window.requestAnimationFrame(tick);
-  }
-
-  function stopRaf() {
-    if (rafRef.current) window.cancelAnimationFrame(rafRef.current);
-    rafRef.current = null;
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }
-
   async function onUploadVideo() {
     if (!uploadFile) return;
     setUploading(true);
@@ -242,8 +174,6 @@ export default function FaceDetection() {
       setVideos(next);
       if (selectedVideoId === videoId) {
         setSelectedVideoId(next[0]?.id ?? null);
-        setDetections([]);
-        stopRaf();
       }
     } catch (e: any) {
       setVideoUploadErr(String(e?.message || e || 'delete failed'));
@@ -285,10 +215,6 @@ export default function FaceDetection() {
         if (st.state === 'error') throw new Error(st.message || 'detection failed');
         await new Promise((r) => setTimeout(r, 800));
       }
-
-      const det = await getDetections(selectedVideoId);
-      setDetections(det);
-      startRaf();
 
       const p = await listPersons();
       setPeople(p);
@@ -379,18 +305,7 @@ export default function FaceDetection() {
                     ref={videoRef}
                     className="w-full h-auto block"
                     src={videoFileUrl(selectedVideoId)}
-                    onPlay={startRaf}
-                    onPause={stopRaf}
-                    onLoadedMetadata={() => {
-                      syncCanvasSize();
-                      drawOverlay();
-                    }}
                     controls={false}
-                  />
-                  <canvas
-                    ref={canvasRef}
-                    className="absolute left-0 top-0 pointer-events-none"
-                    style={{ width: '100%', height: '100%' }}
                   />
                 </>
               ) : (
