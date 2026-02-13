@@ -52,7 +52,7 @@ export default function FaceDetection() {
   const [liveEnabled, setLiveEnabled] = useState<boolean>(true);
   const [liveErr, setLiveErr] = useState<string>('');
   const [liveLastAt, setLiveLastAt] = useState<number>(0);
-  const [liveFps, setLiveFps] = useState<number>(12);
+  const [liveFps, setLiveFps] = useState<number>(5);
 
   async function refreshAll() {
     try {
